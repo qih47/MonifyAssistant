@@ -41,6 +41,29 @@ try {
 
 const ALLOWED_CHAT_IDS = Object.keys(ALLOWED_USERS);
 
+// ==========================================
+// TEMPORARY STORAGE
+// ==========================================
+const pendingTransactions = new Map<string, {
+    amount: number;
+    actor: string;
+    description: string;
+    type: string;
+    timestamp: number;
+}>();
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, value] of pendingTransactions) {
+        if (now - value.timestamp > 10 * 60 * 1000) {
+            pendingTransactions.delete(key);
+        }
+    }
+}, 60 * 1000);
+
+// ==========================================
+// MIDDLEWARE
+// ==========================================
 bot.use(async (ctx, next) => {
     const chatId = (ctx.chat?.id || ctx.message?.chat.id || ctx.myChatMember?.chat.id)?.toString();
     const username = ctx.from?.username || 'Unknown';
@@ -59,7 +82,7 @@ bot.use(async (ctx, next) => {
 
     ctx.state.actor = ALLOWED_USERS[chatId as keyof typeof ALLOWED_USERS] || 'suami';
 
-    if (ctx.updateType === 'message' && ctx.message) {
+    if ((ctx.updateType === 'message' && ctx.message) || ctx.updateType === 'callback_query') {
         return next();
     }
 
@@ -67,21 +90,25 @@ bot.use(async (ctx, next) => {
     return;
 });
 
+// ==========================================
+// COMMAND /start
+// ==========================================
 bot.start((ctx) => {
     const actorEmoji = ctx.state.actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
     ctx.reply(
+        `━━━━━━━━━━━━━━━━━━━\n` +
+        `🤖 *Moni - Asisten Keuangan*\n` +
+        `━━━━━━━━━━━━━━━━━━━\n\n` +
         `Halo ${actorEmoji}! 👋\n\n` +
-        `🤖 *Moni* siap membantu kamu!\n\n` +
         `📝 *Fitur Utama:*\n` +
-        `• Chat transaksi: "Beli kopi 35rb pake jajan qisthi"\n` +
-        `• Cek saldo: /saldo atau "cek saldo"\n` +
-        `• Ringkasan bulanan: /ringkasan atau "ringkasan"\n` +
-        `• Bayar tagihan: /bayar atau "bayar wifi"\n` +
-        `• Bayar cicilan: /cicil atau "bayar cicilan motor"\n` +
-        `• Laporan CSV: /laporan atau "laporan keuangan"\n` +
-        `• Foto struk: Kirim foto struk belanja\n` +
-        `• Ngobrol santai: "Hai Moni!" atau "Apa kabar?"\n\n` +
-        `Aktor terdeteksi: *${ctx.state.actor}*`,
+        `• *Catat transaksi:* "Beli kopi 35rb"\n` +
+        `• *Cek saldo:* /saldo atau "saldo"\n` +
+        `• *Ringkasan:* /ringkasan atau "rekap"\n` +
+        `• *Laporan CSV:* /laporan atau "export"\n` +
+        `• *Bayar tagihan:* /bayar [nama]\n` +
+        `• *Bayar cicilan:* /cicil [nama]\n` +
+        `• *Foto struk:* Kirim foto langsung\n\n` +
+        `Aktor: *${ctx.state.actor === 'suami' ? '🧑 Qisthi' : '👩 Gita'}*`,
         { parse_mode: 'Markdown' }
     );
 });
@@ -91,6 +118,73 @@ bot.start((ctx) => {
 // ==========================================
 const formatIDR = (num: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num);
+
+// ==========================================
+// HELPER: Format Nama Pocket (snake_case -> Title Case)
+// ==========================================
+function formatPocketName(name: string): string {
+    return name.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+}
+
+// ==========================================
+// HELPER: Get Pocket Icon
+// ==========================================
+function getPocketIcon(ownership: string, pocketName?: string): string {
+    // Icon berdasarkan ownership
+    const ownerIconMap: Record<string, string> = {
+        'bersama': '💳',
+        'suami': '🧑',
+        'istri': '👩',
+    };
+    
+    // Icon berdasarkan nama pocket (lebih spesifik)
+    const nameIconMap: Record<string, string> = {
+        'operasional_utama': '🏦',
+        'operasional_harian': '🛒',
+        'jajan_qisthi': '🍜',
+        'jajan_gita': '🧋',
+        'transportasi_dan_kendaraan': '🏍️',
+        'keperluan_bayi': '👶',
+        'kebutuhan_rutin_bulanan': '📋',
+        'tabungan_masa_depan': '💰',
+   
+    };
+    
+    if (pocketName && nameIconMap[pocketName]) {
+        return nameIconMap[pocketName];
+    }
+    
+    return ownerIconMap[ownership] || '💵';
+}
+
+// ==========================================
+// HELPER: Natural Response Generator
+// ==========================================
+async function generateNaturalResponse(context: string, userName: string): Promise<string> {
+    try {
+        const OpenAI = (await import('openai')).default;
+        const groqClient = new OpenAI({
+            apiKey: process.env.GROQ_API_KEY || '',
+            baseURL: 'https://api.groq.com/openai/v1',
+        });
+
+        const response = await groqClient.chat.completions.create({
+            model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
+            temperature: 0.5,
+            messages: [
+                {
+                    role: 'system',
+                    content: `Kamu adalah Moni, asisten keuangan keluarga yang profesional, informatif, dan friendly. Panggil user "${userName}" atau "Kak". Bahasa Indonesia yang baik, jelas, dan to the point. JANGAN gunakan kata "gue", "lo", "cuy". Singkat 1-2 kalimat.`
+                },
+                { role: 'user', content: context }
+            ],
+            max_tokens: 60,
+        });
+        return response.choices[0]?.message?.content || 'Siap, Kak! 🚀';
+    } catch {
+        return 'Siap, Kak! 🚀';
+    }
+}
 
 // ==========================================
 // HELPER: List Tagihan Unpaid
@@ -106,22 +200,25 @@ async function handleListTagihan(ctx: any) {
         if (error) throw error;
 
         if (!bills || bills.length === 0) {
-            return ctx.reply("✅ Ga ada tagihan pending, Cuy! Aman terkendali.");
+            return ctx.reply("✅ Tidak ada tagihan pending, Kak! Keuangan aman terkendali.");
         }
 
-        let listText = "📋 **Daftar Tagihan Belum Dibayar:**\n\n";
+        let totalTagihan = 0;
+        let listText = "━━━━━━━━━━━━━━━━━━━\n📋 *DAFTAR TAGIHAN BELUM DIBAYAR*\n━━━━━━━━━━━━━━━━━━━\n\n";
         bills.forEach((b, i) => {
+            totalTagihan += Number(b.amount);
             const dueDate = b.due_date
-                ? new Date(b.due_date * 1000).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
-                : '?';
-            listText += `${i + 1}. *${b.name}* — ${formatIDR(Number(b.amount))} (Jatuh tempo: ${dueDate})\n`;
+                ? new Date(b.due_date * 1000).toLocaleDateString('id-ID', { day: 'numeric', month: 'long' })
+                : 'Tgl tidak diketahui';
+            listText += `${i + 1}. *${b.name}*\n   💰 ${formatIDR(Number(b.amount))} | 📅 Jatuh tempo: ${dueDate}\n\n`;
         });
-        listText += `\nKetik \`bayar [nama tagihan]\` buat bayar.\nContoh: \`bayar wifi\``;
+        listText += `━━━━━━━━━━━━━━━━━━━\n⚠️ *Total Tagihan: ${formatIDR(totalTagihan)}*\n\n`;
+        listText += `Ketik \`bayar [nama tagihan]\` untuk melunasi.`;
 
         await ctx.replyWithMarkdown(listText);
     } catch (err) {
         console.error("❌ Gagal list tagihan:", err);
-        await ctx.reply("⚠️ Gagal narik daftar tagihan, Cuy.");
+        await ctx.reply("⚠️ Gagal mengambil data tagihan, Kak.");
     }
 }
 
@@ -132,36 +229,46 @@ async function handleListCicilan(ctx: any) {
     try {
         const { data: installments, error } = await supabase
             .from('installments')
-            .select('name, monthly_amount, paid_months, tenor_months')
+            .select('name, monthly_amount, paid_months, tenor_months, total_amount, down_payment')
             .order('name', { ascending: true });
 
         if (error) throw error;
 
         if (!installments || installments.length === 0) {
-            return ctx.reply("✅ Ga ada cicilan aktif, Cuy! Aman terkendali.");
+            return ctx.reply("✅ Tidak ada cicilan aktif, Kak! Keuangan aman terkendali.");
         }
 
-        let listText = "🏠 **Daftar Cicilan Aktif:**\n\n";
+        let listText = "━━━━━━━━━━━━━━━━━━━\n🏠 *DAFTAR CICILAN AKTIF*\n━━━━━━━━━━━━━━━━━━━\n\n";
         let adaCicilan = false;
+        let totalCicilanBulanan = 0;
 
         installments.forEach((i, idx) => {
             const sisaBulan = Number(i.tenor_months) - Number(i.paid_months);
             if (sisaBulan > 0) {
                 adaCicilan = true;
-                listText += `${idx + 1}. *${i.name}* — ${formatIDR(Number(i.monthly_amount))}/bulan (Progress: ${i.paid_months}/${i.tenor_months})\n`;
+                totalCicilanBulanan += Number(i.monthly_amount);
+                const totalDibayar = Number(i.down_payment || 0) + (Number(i.paid_months) * Number(i.monthly_amount));
+                const sisaTotal = Number(i.total_amount) - totalDibayar;
+                const progressPct = Math.round((Number(i.paid_months) / Number(i.tenor_months)) * 100);
+                
+                listText += `${idx + 1}. *${i.name}*\n`;
+                listText += `   💰 ${formatIDR(Number(i.monthly_amount))}/bulan\n`;
+                listText += `   📊 Progress: ${i.paid_months}/${i.tenor_months} bulan (${progressPct}%)\n`;
+                listText += `   💵 Sisa total: ${formatIDR(sisaTotal)}\n\n`;
             }
         });
 
         if (!adaCicilan) {
-            return ctx.reply("🎉 Semua cicilan udah lunas, Cuy! Ga ada yang perlu dibayar.");
+            return ctx.reply("🎉 Semua cicilan sudah lunas, Kak! Tidak ada yang perlu dibayar.");
         }
 
-        listText += `\nKetik \`cicil [nama cicilan]\` buat bayar.\nContoh: \`cicil motor\``;
+        listText += `━━━━━━━━━━━━━━━━━━━\n⚠️ *Total Cicilan/Bulan: ${formatIDR(totalCicilanBulanan)}*\n\n`;
+        listText += `Ketik \`cicil [nama cicilan]\` untuk membayar.`;
 
         await ctx.replyWithMarkdown(listText);
     } catch (err) {
         console.error("❌ Gagal list cicilan:", err);
-        await ctx.reply("⚠️ Gagal narik daftar cicilan, Cuy.");
+        await ctx.reply("⚠️ Gagal mengambil data cicilan, Kak.");
     }
 }
 
@@ -179,64 +286,67 @@ async function handleCekSaldo(ctx: any) {
             return await ctx.reply("⚠️ Belum ada data kantong anggaran di database.");
         }
 
-        let saldoBersama = 0, saldoQisthi = 0, saldoGita = 0, detailText = "";
+        let saldoBersama = 0, saldoQisthi = 0, saldoGita = 0;
+        let detailBersama = "", detailQisthi = "", detailGita = "";
 
         pockets.forEach(p => {
             const balance = Number(p.current_balance || 0);
-            if (p.ownership === 'bersama') saldoBersama += balance;
-            else if (p.ownership === 'suami') saldoQisthi += balance;
-            else if (p.ownership === 'istri') saldoGita += balance;
+            const icon = getPocketIcon(p.ownership);
+            const cleanName = formatPocketName(p.name);
+            const line = `   ${icon} ${cleanName}: *${formatIDR(balance)}*\n`;
 
-            const cleanName = p.name.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
-            detailText += `• ${cleanName}: *${formatIDR(balance)}*\n`;
+            if (p.ownership === 'bersama') {
+                saldoBersama += balance;
+                detailBersama += line;
+            } else if (p.ownership === 'suami') {
+                saldoQisthi += balance;
+                detailQisthi += line;
+            } else if (p.ownership === 'istri') {
+                saldoGita += balance;
+                detailGita += line;
+            }
         });
 
         const totalSemua = saldoBersama + saldoQisthi + saldoGita;
 
-        const reportText = `
-💰 **LAPORAN SALDO REAL-TIME** 💰
-━━━━━━━━━━━━━━━━━━━
-🌐 **Kantong Bersama :** *${formatIDR(saldoBersama)}*
-🧑 **Kantong Qisthi   :** *${formatIDR(saldoQisthi)}*
-👩 **Kantong Gita      :** *${formatIDR(saldoGita)}*
-━━━━━━━━━━━━━━━━━━━
-📊 **Total Aset Dana  :** *${formatIDR(totalSemua)}*
+        const reportText = 
+`━━━━━━━━━━━━━━━━━━━\n💰 *LAPORAN SALDO REAL-TIME*\n━━━━━━━━━━━━━━━━━━━\n
+🌐 *Kantong Bersama:* *${formatIDR(saldoBersama)}*
+${detailBersama}
+🧑 *Kantong Qisthi:* *${formatIDR(saldoQisthi)}*
+${detailQisthi}
+👩 *Kantong Gita:* *${formatIDR(saldoGita)}*
+${detailGita}
+━━━━━━━━━━━━━━━━━━━\n📊 *Total Aset Dana:* *${formatIDR(totalSemua)}*\n━━━━━━━━━━━━━━━━━━━\n🤖 Moni • Data real-time`;
 
-📋 *Breakdown Detail Kantong:*
-${detailText}
-━━━━━━━━━━━━━━━━━━━
-🤖 *Moni • Data real-time dari database.*
-        `;
         await ctx.replyWithMarkdown(reportText);
     } catch (err) {
         console.error("❌ Gagal load saldo:", err);
-        await ctx.reply("⚠️ Waduh, gagal narik data saldo, Cuy.");
+        await ctx.reply("⚠️ Gagal mengambil data saldo, Kak.");
     }
 }
 
 // ==========================================
-// HELPER: Ringkasan Bulanan (DENGAN CICILAN)
+// HELPER: Ringkasan Bulanan
 // ==========================================
 async function handleRingkasan(ctx: any) {
     try {
-        await ctx.reply("📊 Lagi nyusun ringkasan keuangan bulan ini, bentar ya...");
+        await ctx.reply("📊 Menyusun ringkasan keuangan bulan ini...");
 
         const sekarang = new Date();
         const awalBulan = new Date(sekarang.getFullYear(), sekarang.getMonth(), 1).toISOString();
         const akhirBulan = new Date(sekarang.getFullYear(), sekarang.getMonth() + 1, 0, 23, 59, 59).toISOString();
         const bulanTeks = sekarang.toLocaleString('id-ID', { month: 'long', year: 'numeric' });
 
-        // 1. Arus Kas
-        const { data: txData, error: txError } = await supabase
+        const { data: txData } = await supabase
             .from('transactions')
             .select('amount, type, actor')
             .gte('created_at', awalBulan)
             .lte('created_at', akhirBulan);
 
-        if (txError) throw txError;
-
         let totalPemasukan = 0, totalPengeluaran = 0;
         let pengeluaranQisthi = 0, pengeluaranGita = 0, pengeluaranBersama = 0;
+        let totalTransaksi = txData?.length || 0;
 
         txData?.forEach(tx => {
             if (tx.type === 'income') totalPemasukan += Number(tx.amount);
@@ -248,10 +358,9 @@ async function handleRingkasan(ctx: any) {
             }
         });
 
-        // 2. Tagihan Unpaid
         const { data: bills } = await supabase
             .from('bills')
-            .select('name, amount, due_date, status')
+            .select('name, amount, due_date')
             .eq('status', 'unpaid')
             .order('due_date', { ascending: true });
 
@@ -260,88 +369,74 @@ async function handleRingkasan(ctx: any) {
             bills.forEach(b => {
                 totalTagihan += Number(b.amount);
                 const dueDate = b.due_date ? new Date(b.due_date * 1000).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '?';
-                tagihanText += `• ${b.name}: *${formatIDR(Number(b.amount))}* (Jatuh tempo: ${dueDate})\n`;
+                tagihanText += `• ${b.name}: ${formatIDR(Number(b.amount))} (Jatuh tempo: ${dueDate})\n`;
             });
         } else {
-            tagihanText = "✅ Tidak ada tagihan pending.\n";
+            tagihanText = "✅ Tidak ada tagihan pending\n";
         }
 
-        // 3. Cicilan Kredit (installments)
         const { data: installments } = await supabase
             .from('installments')
-            .select('name, total_amount, monthly_amount, paid_months, tenor_months, down_payment');
+            .select('name, monthly_amount, paid_months, tenor_months, total_amount, down_payment');
 
         let cicilanText = "", totalCicilanBulanan = 0;
         if (installments && installments.length > 0) {
             installments.forEach(i => {
-                const sisaBulan = Number(i.tenor_months) - Number(i.paid_months);
-                const cicilanBulanIni = Number(i.monthly_amount);
-                totalCicilanBulanan += cicilanBulanIni;
-                const totalDibayar = Number(i.down_payment) + (Number(i.paid_months) * cicilanBulanIni);
-                const sisaTotal = Number(i.total_amount) - totalDibayar;
-
-                cicilanText += `• ${i.name}: *${formatIDR(cicilanBulanIni)}/bulan*\n`;
-                cicilanText += `  └ Progress: ${i.paid_months}/${i.tenor_months} bulan | Sisa: *${formatIDR(sisaTotal)}*\n`;
+                const sisa = Number(i.tenor_months) - Number(i.paid_months);
+                if (sisa > 0) {
+                    const cicilan = Number(i.monthly_amount);
+                    totalCicilanBulanan += cicilan;
+                    const totalDibayar = Number(i.down_payment || 0) + (Number(i.paid_months) * cicilan);
+                    const sisaTotal = Number(i.total_amount) - totalDibayar;
+                    cicilanText += `• ${i.name}: ${formatIDR(cicilan)}/bln (${i.paid_months}/${i.tenor_months}, sisa ${formatIDR(sisaTotal)})\n`;
+                }
             });
         } else {
-            cicilanText = "✅ Tidak ada cicilan kredit.\n";
+            cicilanText = "✅ Tidak ada cicilan kredit\n";
         }
 
-        // 4. Saldo Kantong
         const { data: pockets } = await supabase.from('pockets').select('name, current_balance');
-        let saldoText = "", totalSaldo = 0;
-        pockets?.forEach(p => {
-            const balance = Number(p.current_balance || 0);
-            totalSaldo += balance;
-            const cleanName = p.name.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
-            saldoText += `• ${cleanName}: *${formatIDR(balance)}*\n`;
-        });
+        let totalSaldo = 0;
+        pockets?.forEach(p => { totalSaldo += Number(p.current_balance || 0); });
 
         const totalKewajiban = totalTagihan + totalCicilanBulanan;
         const sisaSetelahBayar = totalSaldo - totalKewajiban;
 
-        const ringkasan = `
-📊 **RINGKASAN KEUANGAN** 📊
-*${bulanTeks}*
-━━━━━━━━━━━━━━━━━━━
-
-💰 **ARUS KAS:**
+        const ringkasan = 
+`━━━━━━━━━━━━━━━━━━━\n📊 *RINGKASAN KEUANGAN*\n${bulanTeks}\n━━━━━━━━━━━━━━━━━━━\n
+💰 *ARUS KAS:*
 🟢 Pemasukan: *${formatIDR(totalPemasukan)}*
 🔴 Pengeluaran: *${formatIDR(totalPengeluaran)}*
 📈 Selisih: *${formatIDR(totalPemasukan - totalPengeluaran)}*
+📝 Total Transaksi: ${totalTransaksi}
 
-👤 **PENGELUARAN:**
+👤 *PENGELUARAN:*
 🧑 Qisthi: *${formatIDR(pengeluaranQisthi)}*
 👩 Gita: *${formatIDR(pengeluaranGita)}*
 🌐 Bersama: *${formatIDR(pengeluaranBersama)}*
 
-💼 **SALDO:**
-${saldoText}
-💵 Total: *${formatIDR(totalSaldo)}*
+💼 *SALDO SAAT INI:* *${formatIDR(totalSaldo)}*
 
-📋 **TAGIHAN PENDING:**
+📋 *TAGIHAN PENDING:*
 ${tagihanText}
 
-🏠 **CICILAN KREDIT:**
+🏠 *CICILAN AKTIF:*
 ${cicilanText}
 
-⚠️ **TOTAL KEWAJIBAN:** *${formatIDR(totalKewajiban)}*
-💰 **SISA SETELAH BAYAR:** *${formatIDR(sisaSetelahBayar)}*
-${sisaSetelahBayar < 0 ? '⚠️ PERHATIAN: Saldo tidak cukup!' : '✅ Saldo cukup.'}
-━━━━━━━━━━━━━━━━━━━
-🤖 *Moni • Ringkasan real-time.*
-        `;
+⚠️ *TOTAL KEWAJIBAN:* *${formatIDR(totalKewajiban)}*
+💰 *SISA SETELAH BAYAR:* *${formatIDR(sisaSetelahBayar)}*
+${sisaSetelahBayar < 0 ? '⚠️ PERHATIAN: Saldo tidak cukup!' : '✅ Saldo cukup untuk semua kewajiban.'}
+━━━━━━━━━━━━━━━━━━━\n🤖 Moni • Ringkasan real-time`;
 
         await ctx.replyWithMarkdown(ringkasan);
-
     } catch (err) {
         console.error("❌ Gagal ringkasan:", err);
-        await ctx.reply("⚠️ Gagal nyusun ringkasan, Cuy.");
+        await ctx.reply("⚠️ Gagal menyusun ringkasan, Kak.");
     }
 }
 
 // ==========================================
-// HELPER: Bayar Tagihan (DENGAN KONFIRMASI)
+// HELPER: Bayar Tagihan
 // ==========================================
 async function handleBayarTagihan(ctx: any, namaTagihan: string) {
     try {
@@ -352,20 +447,15 @@ async function handleBayarTagihan(ctx: any, namaTagihan: string) {
             .eq('status', 'unpaid');
 
         if (error) throw error;
-
-        if (!bills || bills.length === 0) {
-            return await handleListTagihan(ctx);
-        }
+        if (!bills || bills.length === 0) return await handleListTagihan(ctx);
 
         if (bills.length > 1) {
-            let listText = `🤔 Ada beberapa tagihan yang mirip nih:\n\n`;
+            let listText = `🤔 Ditemukan beberapa tagihan:\n\n`;
             bills.forEach((b, idx) => {
-                const dueDate = b.due_date
-                    ? new Date(b.due_date * 1000).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
-                    : '?';
+                const dueDate = b.due_date ? new Date(b.due_date * 1000).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '?';
                 listText += `${idx + 1}. *${b.name}* — ${formatIDR(Number(b.amount))} (Jatuh tempo: ${dueDate})\n`;
             });
-            listText += `\nKetik lebih spesifik ya, Cuy!\nContoh: \`bayar wifi biznet\` atau \`bayar listrik pln\``;
+            listText += `\nSilakan ketik lebih spesifik.\nContoh: \`bayar wifi biznet\``;
             return await ctx.replyWithMarkdown(listText);
         }
 
@@ -373,13 +463,15 @@ async function handleBayarTagihan(ctx: any, namaTagihan: string) {
         const amount = Number(bill.amount);
         const actor = ctx.state.actor;
         const encodedName = encodeURIComponent(bill.name);
+        const dueDate = bill.due_date ? new Date(bill.due_date * 1000).toLocaleDateString('id-ID', { day: 'numeric', month: 'long' }) : 'Tidak diketahui';
 
         await ctx.reply(
-            `🧾 **Konfirmasi Bayar Tagihan**\n\n` +
+            `━━━━━━━━━━━━━━━━━━━\n🧾 *KONFIRMASI BAYAR TAGIHAN*\n━━━━━━━━━━━━━━━━━━━\n\n` +
             `📝 *${bill.name}*\n` +
             `💰 Nominal: *${formatIDR(amount)}*\n` +
+            `📅 Jatuh Tempo: ${dueDate}\n` +
             `👤 Eksekutor: ${actor === 'suami' ? '🧑 Qisthi' : '👩 Gita'}\n\n` +
-            `Mau potong dari kantong mana nih?`,
+            `Pilih sumber dana:`,
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
@@ -392,15 +484,14 @@ async function handleBayarTagihan(ctx: any, namaTagihan: string) {
                 }
             }
         );
-
     } catch (err) {
         console.error("❌ Gagal bayar tagihan:", err);
-        await ctx.reply("⚠️ Error pas proses bayar tagihan, Cuy.");
+        await ctx.reply("⚠️ Error saat memproses pembayaran tagihan, Kak.");
     }
 }
 
 // ==========================================
-// HELPER: Bayar Cicilan (DENGAN KONFIRMASI)
+// HELPER: Bayar Cicilan
 // ==========================================
 async function handleBayarCicilan(ctx: any, namaCicilan: string) {
     try {
@@ -410,24 +501,16 @@ async function handleBayarCicilan(ctx: any, namaCicilan: string) {
             .ilike('name', `%${namaCicilan}%`);
 
         if (error) throw error;
-
         const aktif = installments?.filter(i => Number(i.tenor_months) > Number(i.paid_months)) || [];
-
-        if (!installments || installments.length === 0) {
-            return await handleListCicilan(ctx);
-        }
-
-        if (aktif.length === 0) {
-            return ctx.reply(`✅ Semua cicilan yang mengandung *"${namaCicilan}"* udah lunas, Cuy! 🎉`);
-        }
-
+        if (!installments || installments.length === 0) return await handleListCicilan(ctx);
+        if (aktif.length === 0) return ctx.reply(`✅ Semua cicilan dengan kata *"${namaCicilan}"* sudah lunas, Kak! 🎉`);
         if (aktif.length > 1) {
-            let listText = `🤔 Ada beberapa cicilan yang mirip nih:\n\n`;
+            let listText = `🤔 Ditemukan beberapa cicilan:\n\n`;
             aktif.forEach((i, idx) => {
                 const sisa = Number(i.tenor_months) - Number(i.paid_months);
                 listText += `${idx + 1}. *${i.name}* — ${formatIDR(Number(i.monthly_amount))}/bulan (Sisa ${sisa} bulan)\n`;
             });
-            listText += `\nKetik lebih spesifik ya, Cuy!\nContoh: \`cicil motor beat\` atau \`cicil rumah kpr\``;
+            listText += `\nSilakan ketik lebih spesifik.\nContoh: \`cicil motor beat\``;
             return await ctx.replyWithMarkdown(listText);
         }
 
@@ -435,14 +518,15 @@ async function handleBayarCicilan(ctx: any, namaCicilan: string) {
         const amount = Number(installment.monthly_amount);
         const actor = ctx.state.actor;
         const encodedName = encodeURIComponent(installment.name);
+        const progressPct = Math.round((Number(installment.paid_months) / Number(installment.tenor_months)) * 100);
 
         await ctx.reply(
-            `🏠 **Konfirmasi Bayar Cicilan**\n\n` +
+            `━━━━━━━━━━━━━━━━━━━\n🏠 *KONFIRMASI BAYAR CICILAN*\n━━━━━━━━━━━━━━━━━━━\n\n` +
             `📝 *${installment.name}*\n` +
             `💰 Nominal Bulanan: *${formatIDR(amount)}*\n` +
-            `📊 Progress: ${installment.paid_months}/${installment.tenor_months} bulan\n` +
+            `📊 Progress: ${installment.paid_months}/${installment.tenor_months} bulan (${progressPct}%)\n` +
             `👤 Eksekutor: ${actor === 'suami' ? '🧑 Qisthi' : '👩 Gita'}\n\n` +
-            `Mau potong dari kantong mana nih?`,
+            `Pilih sumber dana:`,
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
@@ -455,10 +539,9 @@ async function handleBayarCicilan(ctx: any, namaCicilan: string) {
                 }
             }
         );
-
     } catch (err) {
         console.error("❌ Gagal bayar cicilan:", err);
-        await ctx.reply("⚠️ Error pas proses bayar cicilan, Cuy.");
+        await ctx.reply("⚠️ Error saat memproses pembayaran cicilan, Kak.");
     }
 }
 
@@ -467,7 +550,11 @@ async function handleBayarCicilan(ctx: any, namaCicilan: string) {
 // ==========================================
 async function handleLaporan(ctx: any) {
     try {
-        await ctx.reply("📊 Sedang merekap data transaksi dan merakit file Excel...");
+        const naturalReply = await generateNaturalResponse(
+            'User minta laporan keuangan. Beri response profesional.',
+            ctx.state.actor === 'suami' ? 'Qisthi' : 'Gita'
+        );
+        await ctx.reply(naturalReply);
 
         const sekarang = new Date();
         const awalBulan = new Date(sekarang.getFullYear(), sekarang.getMonth(), 1).toISOString();
@@ -482,17 +569,17 @@ async function handleLaporan(ctx: any) {
 
         if (error) throw error;
         if (!txData || txData.length === 0) {
-            return await ctx.reply("ℹ️ Belum ada histori transaksi untuk bulan ini, Cuy.");
+            return await ctx.reply("ℹ️ Belum ada transaksi untuk bulan ini, Kak.");
         }
 
-        let csvContent = "Tanggal;Deskripsi;Nominal;Tipe;Kantong Pos;Eksekutor\n";
+        let csvContent = "Tanggal;Deskripsi;Nominal;Tipe;Kantong;Eksekutor\n";
         txData.forEach(tx => {
             const tgl = new Date(tx.created_at).toLocaleDateString('id-ID');
             const deskripsi = tx.description.replace(/;/g, ',');
             const nominal = tx.amount;
             const tipe = tx.type === 'expense' ? 'Pengeluaran' : tx.type === 'income' ? 'Pemasukan' : 'Transfer';
             // @ts-ignore
-            const namaKantong = tx.pockets?.name ? tx.pockets.name.replace(/_/g, ' ') : 'Umum';
+            const namaKantong = tx.pockets?.name ? formatPocketName(tx.pockets.name) : 'Umum';
             const pelaku = tx.actor === 'suami' ? 'Qisthi' : tx.actor === 'istri' ? 'Gita' : 'Sistem';
             csvContent += `${tgl};${deskripsi};${nominal};${tipe};${namaKantong};${pelaku}\n`;
         });
@@ -504,362 +591,288 @@ async function handleLaporan(ctx: any) {
             source: streamFile,
             filename: namaFile
         }, {
-            caption: `📊 **Laporan Keuangan Selesai Dibuat!**\n\nFile CSV siap dibuka di Excel. 🚀`
+            caption: `━━━━━━━━━━━━━━━━━━━\n📊 *LAPORAN KEUANGAN*\n${sekarang.toLocaleString('id-ID', { month: 'long', year: 'numeric' })}\n━━━━━━━━━━━━━━━━━━━\n\nFile CSV siap dibuka di Excel. 🚀`
         });
 
     } catch (err) {
         console.error("❌ Gagal membuat laporan:", err);
-        await ctx.reply("⚠️ Error pas generate laporan, Cuy.");
+        await ctx.reply("⚠️ Error saat generate laporan, Kak.");
     }
 }
 
 // ==========================================
-// HELPER: Parser Transaksi Manual (Fallback)
+// HELPER: Parser Manual
 // ==========================================
 function parseTransactionManual(text: string): { amount: number; description: string; type: string; allocated_pocket: string; actor: string } | null {
     const pesan = text.toLowerCase().trim();
-
-    // Regex: cari nominal uang
     const nominalMatch = pesan.match(/(\d+[.,]?\d*)\s*(rb|ribu|k|jt|juta|m|milyar|miliar)?/i);
     if (!nominalMatch) return null;
 
     let amount = Number(nominalMatch[1].replace(',', '.'));
     const unit = nominalMatch[2]?.toLowerCase();
-
     if (unit === 'rb' || unit === 'ribu' || unit === 'k') amount *= 1000;
     else if (unit === 'jt' || unit === 'juta') amount *= 1000000;
     else if (unit === 'milyar' || unit === 'miliar' || unit === 'm') amount *= 1000000000;
-
     if (amount <= 0 || amount > 100000000000) return null;
 
-    // Deteksi tipe
     let type = 'expense';
-    if (/gaji|masuk|income|bonus|dapet|terima|transfer masuk/i.test(pesan)) {
-        type = 'income';
-    } else if (/transfer|pindah/i.test(pesan)) {
-        type = 'transfer';
-    }
+    if (/gaji|masuk|income|bonus|dapet|terima|transfer masuk/i.test(pesan)) type = 'income';
+    else if (/transfer|pindah/i.test(pesan)) type = 'transfer';
 
-    // Deteksi aktor
     let actor = 'auto';
-    if (/gita|istri|bunda|mama|istri saya/i.test(pesan)) {
-        actor = 'istri';
-    } else if (/\bsaya\b|\baku\b|qisthi|ayah|papa|suami/i.test(pesan)) {
-        actor = 'suami';
-    }
+    if (/gita|istri|bunda|mama/i.test(pesan)) actor = 'istri';
+    else if (/\bsaya\b|\baku\b|qisthi|ayah|papa/i.test(pesan)) actor = 'suami';
 
-    // Deteksi kantong
     let allocated_pocket = 'ASK_USER';
-    if (/jajan qisthi|jajan ku|jajan saya|jajan pribadi qisthi/i.test(pesan)) allocated_pocket = 'jajan_qisthi';
-    else if (/jajan gita|jajan istri|jajan pribadi gita/i.test(pesan)) allocated_pocket = 'jajan_gita';
+    if (/jajan qisthi|jajan ku|jajan saya/i.test(pesan)) allocated_pocket = 'jajan_qisthi';
+    else if (/jajan gita|jajan istri/i.test(pesan)) allocated_pocket = 'jajan_gita';
     else if (/operasional/i.test(pesan)) allocated_pocket = 'operasional_utama';
-    else if (/transportasi|bensin|motor|servis|parkir|spbu/i.test(pesan)) allocated_pocket = 'transportasi_dan_kendaraan';
-    else if (/bayi|popok|susu|anak|babyshop/i.test(pesan)) allocated_pocket = 'keperluan_bayi';
-    else if (/wifi|listrik|tagihan|pln|pdam|pulsa/i.test(pesan)) allocated_pocket = 'kebutuhan_rutin_bulanan';
-    else if (/tabungan|investasi|emas|reksadana|saham/i.test(pesan)) allocated_pocket = 'tabungan_masa_depan';
-    else if (/jajan|makan|kopi|cemilan|bakso|seblak|mie|ayam|es|minum/i.test(pesan)) allocated_pocket = 'operasional_harian';
+    else if (/transportasi|bensin|motor|servis|parkir/i.test(pesan)) allocated_pocket = 'transportasi_dan_kendaraan';
+    else if (/bayi|popok|susu|anak/i.test(pesan)) allocated_pocket = 'keperluan_bayi';
+    else if (/wifi|listrik|tagihan|pln/i.test(pesan)) allocated_pocket = 'kebutuhan_rutin_bulanan';
+    else if (/tabungan|investasi|emas/i.test(pesan)) allocated_pocket = 'tabungan_masa_depan';
+    else if (/jajan|makan|kopi|cemilan/i.test(pesan)) allocated_pocket = 'operasional_harian';
 
-    // Deskripsi
-    const cleanDesc = text
-        .replace(/rp\.?\s*/gi, '')
-        .replace(/\d+[.,]?\d*\s*(rb|ribu|k|jt|juta|m|milyar|miliar)?/gi, '')
-        .replace(/pake\s+.*/gi, '')
-        .replace(/dari\s+.*/gi, '')
-        .replace(/masuk\s+ke\s+.*/gi, '')
-        .trim();
-
+    const cleanDesc = text.replace(/rp\.?\s*/gi, '').replace(/\d+[.,]?\d*\s*(rb|ribu|k|jt|juta|m|milyar|miliar)?/gi, '').replace(/pake\s+.*/gi, '').replace(/dari\s+.*/gi, '').replace(/masuk\s+ke\s+.*/gi, '').trim();
     const description = cleanDesc || text.replace(/\d.*/, '').trim() || 'Transaksi';
 
-    return {
-        amount: Math.round(amount),
-        description: description.replace(/^[.,\s]+/, '').trim() || 'Transaksi',
-        type,
-        allocated_pocket,
-        actor
-    };
+    return { amount: Math.round(amount), description: description.replace(/^[.,\s]+/, '').trim() || 'Transaksi', type, allocated_pocket, actor };
 }
 
 // ==========================================
-// HANDLER TEKS (DENGAN PRIORITAS KEYWORD)
+// HELPER: Get Pocket Buttons from DB
+// ==========================================
+async function getPocketButtons(txId: string): Promise<Array<Array<{ text: string; callback_data: string }>>> {
+    try {
+        const { data: pockets } = await supabase.from('pockets').select('name, ownership').order('name');
+
+        if (!pockets || pockets.length === 0) {
+            return [
+                [{ text: '🌐 Operasional Utama', callback_data: `p:${txId}:operasional_utama` }],
+                [{ text: '🧑 Jajan Qisthi', callback_data: `p:${txId}:jajan_qisthi` }],
+                [{ text: '👩 Jajan Gita', callback_data: `p:${txId}:jajan_gita` }],
+                [{ text: '🚗 Transportasi', callback_data: `p:${txId}:transportasi_dan_kendaraan` }],
+                [{ text: '👶 Keperluan Bayi', callback_data: `p:${txId}:keperluan_bayi` }],
+                [{ text: '📋 Kebutuhan Rutin', callback_data: `p:${txId}:kebutuhan_rutin_bulanan` }],
+                [{ text: '🏦 Tabungan', callback_data: `p:${txId}:tabungan_masa_depan` }],
+                [{ text: '❌ Batal', callback_data: `cancel:${txId}` }]
+            ];
+        }
+
+        const buttons: Array<Array<{ text: string; callback_data: string }>> = [];
+        let currentRow: Array<{ text: string; callback_data: string }> = [];
+
+        pockets.forEach((p, index) => {
+            const icon = getPocketIcon(p.ownership);
+            const cleanName = formatPocketName(p.name);
+            currentRow.push({ text: `${icon} ${cleanName}`, callback_data: `p:${txId}:${p.name}` });
+
+            if (currentRow.length === 2 || index === pockets.length - 1) {
+                buttons.push([...currentRow]);
+                currentRow = [];
+            }
+        });
+
+        buttons.push([{ text: '❌ Batal', callback_data: `cancel:${txId}` }]);
+        return buttons;
+    } catch (err) {
+        console.error('❌ Gagal ambil pockets:', err);
+        return [[{ text: '❌ Error', callback_data: `cancel:${txId}` }]];
+    }
+}
+
+// ==========================================
+// HANDLER TEKS
 // ==========================================
 bot.on('text', async (ctx) => {
     const pesanAsli = ctx.message.text;
     const pesan = pesanAsli.toLowerCase().trim();
+    const userName = ctx.state.actor === 'suami' ? 'Qisthi' : 'Gita';
 
-    // 1. SKIP COMMAND
     if (pesan.startsWith('/')) return;
 
-    // 2. KEYWORD BAYAR CICILAN (HARUS DI ATAS BAYAR TAGIHAN!)
-    if (pesan === 'cicil' || pesan === 'cicilan' || pesan === 'bayar cicilan') {
-        return await handleListCicilan(ctx);
-    }
-
+    // BAYAR CICILAN
+    if (pesan === 'cicil' || pesan === 'cicilan' || pesan === 'bayar cicilan') return await handleListCicilan(ctx);
     if (pesan.startsWith('cicil ') || pesan.startsWith('bayar cicilan ')) {
-        const namaCicilan = pesan.replace(/^(cicil|bayar cicilan)\s+/, '').trim();
-        console.log(`🔍 Bayar cicilan: "${namaCicilan}"`);
-        return await handleBayarCicilan(ctx, namaCicilan);
+        return await handleBayarCicilan(ctx, pesan.replace(/^(cicil|bayar cicilan)\s+/, '').trim());
     }
 
-    // 3. KEYWORD BAYAR TAGIHAN
-    if (pesan === 'bayar' || pesan === 'bayarin' || pesan === 'bayar tagihan' || pesan === 'tagihan') {
-        return await handleListTagihan(ctx);
-    }
-
+    // BAYAR TAGIHAN
+    if (pesan === 'bayar' || pesan === 'bayarin' || pesan === 'bayar tagihan' || pesan === 'tagihan') return await handleListTagihan(ctx);
     if (pesan.startsWith('bayar ') || pesan.startsWith('bayarin ')) {
         const namaTagihan = pesan.replace(/^bayar(in)?\s+/, '').trim();
-        if (namaTagihan === 'cicilan') {
-            return await handleListCicilan(ctx);
-        }
-        console.log(`🔍 Bayar tagihan: "${namaTagihan}"`);
+        if (namaTagihan === 'cicilan') return await handleListCicilan(ctx);
         return await handleBayarTagihan(ctx, namaTagihan);
     }
 
-    // 4. KEYWORD SALDO
-    const saldoKeywords = ['cek saldo', 'saldo', 'lihat saldo', 'saldo gw', 'sisa saldo', 'sisa uang', 'cek duit'];
+    // LAPORAN CSV
+    const laporanKeywords = ['laporan', 'export', 'csv', 'excel', 'download', 'kirim laporan', 'kirim file', 'laporan keuangan', 'laporan pengeluaran', 'laporan pemasukan', 'download laporan', 'riwayat transaksi', 'history', 'mutasi', 'rekap transaksi', 'laporan moni', 'export laporan', 'file laporan', 'kirim csv', 'kirim excel', 'bikinin laporan', 'buatin laporan', 'minta laporan', 'export data', 'download data'];
+    if (laporanKeywords.some(k => pesan.includes(k))) return await handleLaporan(ctx);
+
+    // SALDO
+    const saldoKeywords = ['cek saldo', 'saldo', 'lihat saldo', 'saldo gw', 'sisa saldo', 'sisa uang', 'cek duit', 'uang sekarang'];
     if (saldoKeywords.some(k => pesan.includes(k))) {
-        console.log(`🔍 Saldo: "${pesanAsli}"`);
-        await ctx.reply("🔍 Menghitung saldo...");
+        const naturalReply = await generateNaturalResponse('User minta cek saldo.', userName);
+        await ctx.reply(naturalReply);
         return await handleCekSaldo(ctx);
     }
 
-    // 5. KEYWORD RINGKASAN
-    const ringkasanKeywords = ['ringkasan', 'rekap', 'rangkuman', 'summary', 'overview', 'ikhtisar', 'bulan ini'];
-    if (ringkasanKeywords.some(k => pesan.includes(k))) {
-        console.log(`🔍 Ringkasan: "${pesanAsli}"`);
-        return await handleRingkasan(ctx);
-    }
+    // RINGKASAN
+    const ringkasanKeywords = ['ringkasan', 'rekap', 'rangkuman', 'summary', 'overview', 'ikhtisar', 'bulan ini', 'rangkum'];
+    if (ringkasanKeywords.some(k => pesan.includes(k))) return await handleRingkasan(ctx);
 
-    // 6. KEYWORD LAPORAN (CSV)
-    const laporanKeywords = ['laporan keuangan', 'laporan pengeluaran', 'laporan pemasukan', 'download laporan', 'export', 'riwayat transaksi', 'history', 'mutasi'];
-    if (laporanKeywords.some(k => pesan.includes(k))) {
-        console.log(`🔍 Laporan: "${pesanAsli}"`);
-        return await handleLaporan(ctx);
-    }
-
-    // 7. KEYWORD HELP
+    // HELP
     const helpKeywords = ['help', 'bantuan', 'fitur', 'bisa apa', 'perintah', 'command', 'apa aja'];
     if (helpKeywords.some(k => pesan.includes(k))) {
         return await ctx.reply(
-            `🤖 *Moni - Asisten Keuangan Keluarga*\n\n` +
-            `📝 *Fitur yang tersedia:*\n\n` +
-            `💰 *Cek Saldo*\nKetik "/saldo" atau "cek saldo"\n\n` +
-            `📊 *Ringkasan Bulanan*\nKetik "/ringkasan" atau "ringkasan"\n\n` +
-            `🧾 *Bayar Tagihan*\nKetik "/bayar wifi" atau "bayar listrik"\n\n` +
-            `🏠 *Bayar Cicilan*\nKetik "/cicil motor" atau "bayar cicilan rumah"\n\n` +
-            `📁 *Download Laporan CSV*\nKetik "/laporan" atau "export"\n\n` +
-            `📝 *Catat Transaksi*\n"Beli kopi 35rb pake jajan qisthi"\n\n` +
-            `📸 *Struk Belanja*\nKirim foto struk/nota\n\n` +
-            `💬 *Ngobrol Santai*\n"Hai Moni!" atau curhat apa aja\n\n` +
-            `━━━━━━━━━━━━━━━━━━━\n` +
-            `🤖 *Moni siap bantu 24/7!* 🚀`,
+            `━━━━━━━━━━━━━━━━━━━\n🤖 *MONI - ASISTEN KEUANGAN*\n━━━━━━━━━━━━━━━━━━━\n\n` +
+            `💰 *Cek Saldo*\n/saldo atau "saldo"\n\n` +
+            `📊 *Ringkasan Bulanan*\n/ringkasan atau "rekap"\n\n` +
+            `🧾 *Bayar Tagihan*\n/bayar [nama] atau "bayar wifi"\n\n` +
+            `🏠 *Bayar Cicilan*\n/cicil [nama] atau "cicil motor"\n\n` +
+            `📁 *Laporan CSV*\n/laporan atau "export"\n\n` +
+            `📝 *Catat Transaksi*\n"Beli kopi 35rb"\n\n` +
+            `📸 *Struk Belanja*\nKirim foto langsung\n\n` +
+            `━━━━━━━━━━━━━━━━━━━\n🤖 Moni siap bantu 24/7! 🚀`,
             { parse_mode: 'Markdown' }
         );
     }
 
-    // 8. KEYWORD SAPAAN
-    const sapaanKeywords = ['hai', 'halo', 'hello', 'hi', 'woi', 'eh', 'p', 'pagi', 'siang', 'sore', 'malam', 'assalamualaikum', 'test', 'tes', 'oy', 'oi', 'hallo', 'hewwo', 'hy', 'yo', 'wow', 'halo moni', 'hai moni', 'p moni'];
-    const isSapaanOnly = sapaanKeywords.some(k => pesan === k || pesan.startsWith(k + ' ') || pesan.endsWith(' ' + k));
-
-    if (isSapaanOnly) {
-        const actorEmoji = ctx.state.actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
-        const sapaanList = [
-            `Halo ${actorEmoji}! 👋 Ada yang bisa Moni bantu?`,
-            `Hei ${actorEmoji}! 😊 Lagi ngapain nih? Mau catat transaksi?`,
-            `Hai hai! 🥳 Moni siap bantu keuangan kamu! Mau cek saldo?`,
-            `Yuhuu ${actorEmoji}! 🙌 Mau cek saldo, bayar tagihan, atau catat transaksi?`,
-            `Halo Cuy! 👋 Moni ready 24/7 buat bantu keuangan!`,
-            `Eh ada ${actorEmoji}! 😎 Tumben nyapa, mau transaksi apa nih?`,
-            `Waduh ${actorEmoji}, tak kira siapa! 😆 Ada yang bisa dibantuin?`,
-            `Assalamualaikum ${actorEmoji}! 🌙 Moni siap bantu keuangan!`,
-            `Oy oy oy! ${actorEmoji} muncul juga! 🔥 Mau ngapain nih?`,
-            `Halo halo Bandung! 📞 Ada ${actorEmoji}, mau laporan keuangan?`,
-            `Woi ${actorEmoji}! 🫡 Siap laksanakan tugas! Mau apa nih?`,
-            `Yeay ${actorEmoji} dateng! 🎉 Moni kangen! Mau cek saldo kah?`,
-            `Hai ${actorEmoji}, hari ini cerah ya! ☀️ Ada transaksi yang mau dicatat?`,
-            `Cuy! ${actorEmoji} is in the house! 🏠 Moni siap 24 jam!`,
-        ];
-        return await ctx.reply(sapaanList[Math.floor(Math.random() * sapaanList.length)]);
+    // SAPAAN
+    const sapaanKeywords = ['hai', 'halo', 'hello', 'hi', 'woi', 'eh', 'p', 'pagi', 'siang', 'sore', 'malam', 'assalamualaikum', 'test', 'tes', 'oy', 'oi', 'hallo', 'hy', 'yo', 'wow'];
+    if (sapaanKeywords.some(k => pesan === k || pesan.startsWith(k + ' ') || pesan.endsWith(' ' + k))) {
+        const naturalReply = await generateNaturalResponse(`User "${userName}" menyapa: "${pesanAsli}".`, userName);
+        return await ctx.reply(naturalReply);
     }
 
-    // 9. KEYWORD PERTANYAAN UMUM
+    // PERTANYAAN UMUM
     const tanyaKeywords = ['apa kabar', 'gimana', 'bagaimana', 'lagi apa', 'kamu siapa', 'lagi ngapain', 'sehat', 'baik'];
     if (tanyaKeywords.some(k => pesan.includes(k))) {
-        const jawabanList = [
-            `Moni sehat selalu, Cuy! 💪 Lagi siap bantu keuangan kamu nih. Ada yang perlu dicatat?`,
-            `Baik banget! 😊 Moni selalu ready buat bantu catat transaksi atau cek saldo.`,
-            `Alhamdulillah sehat! 🙏 Moni di sini 24/7 buat bantu keuangan keluarga.`,
-        ];
-        return await ctx.reply(jawabanList[Math.floor(Math.random() * jawabanList.length)]);
+        const naturalReply = await generateNaturalResponse(`User tanya: "${pesanAsli}".`, userName);
+        return await ctx.reply(naturalReply);
     }
 
-    // 10. DETEKSI TRANSAKSI
+    // TRANSAKSI
     const punyaNominal = /\d+[.,]?\d*\s*(rb|ribu|k|jt|juta|m|milyar|miliar)?/i.test(pesan);
-    const transaksiKeywords = /beli|bayar|jajan|makan|minum|belanja|transfer|masuk|gaji|bonus|topup|isi|pulsa|servis|bensin|parkir|tagihan|cicil/i.test(pesan);
+    const transaksiKeywords = /beli|bayar|jajan|makan|minum|belanja|transfer|masuk|gaji|bonus|topup|isi|pulsa|servis|bensin|parkir/i.test(pesan);
     const isKemungkinanTransaksi = punyaNominal || transaksiKeywords;
 
-    // 11. PROSES TRANSAKSI (GROQ/GEMINI -> FALLBACK MANUAL)
     if (isKemungkinanTransaksi) {
-        await ctx.reply("⏳ Sebentar ya, Moni catat transaksinya...");
+        await ctx.reply("⏳ Sebentar, Moni proses transaksinya...");
 
         let hasilParse = null;
-        let aiAvailable = true;
-
-        // Coba AI service (Groq atau Gemini)
-        try {
-            hasilParse = await parseFinancialText(pesanAsli);
-            if (!hasilParse) {
-                console.log('⚠️ AI return null, fallback ke manual...');
-            }
-        } catch (aiError: any) {
-            console.log('⚠️ AI error, fallback ke parser manual...');
-            if (aiError?.status === 429) {
-                aiAvailable = false;
-                await ctx.reply('⚠️ *Notif:* AI lagi limit, Moni pake parser manual dulu ya.', { parse_mode: 'Markdown' });
-            }
-        }
-
-        // Fallback ke parser manual
+        try { hasilParse = await parseFinancialText(pesanAsli); } catch {}
         if (!hasilParse) {
             const manualResult = parseTransactionManual(pesanAsli);
-            if (manualResult) {
-                hasilParse = manualResult as any;
-                console.log('✅ Parser manual berhasil!');
-            }
+            if (manualResult) hasilParse = manualResult as any;
         }
 
         if (hasilParse) {
-            const { amount, description, type, allocated_pocket, actor: aiActor } = hasilParse;
+            const { amount, description, type, actor: aiActor } = hasilParse;
             const finalActor = aiActor === 'auto' ? ctx.state.actor : aiActor;
 
-            if (allocated_pocket === 'ASK_USER') {
-                const formattedAmount = formatIDR(amount);
-                const encodedDesc = encodeURIComponent(description);
-                await ctx.reply(
-                    `🤔 **Moni Ragu-Ragu...**\n\n` +
-                    `Transaksi *"${description}"* sebesar *${formattedAmount}* mau dipotong dari kantong mana nih?`,
-                    {
-                        parse_mode: 'Markdown',
-                        reply_markup: {
-                            inline_keyboard: [
-                                [{ text: '🌐 Kantong Bersama', callback_data: `p_idx:${amount}:${finalActor}:operasional_utama:${encodedDesc}` }],
-                                [
-                                    { text: '🧑 Jajan Qisthi', callback_data: `p_idx:${amount}:${finalActor}:jajan_qisthi:${encodedDesc}` },
-                                    { text: '👩 Jajan Gita', callback_data: `p_idx:${amount}:${finalActor}:jajan_gita:${encodedDesc}` }
-                                ],
-                                [{ text: '🚗 Transportasi', callback_data: `p_idx:${amount}:${finalActor}:transportasi_dan_kendaraan:${encodedDesc}` }],
-                                [{ text: '👶 Keperluan Bayi', callback_data: `p_idx:${amount}:${finalActor}:keperluan_bayi:${encodedDesc}` }]
-                            ]
-                        }
-                    }
-                );
-                return;
-            }
+            const txId = 'tx' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+            pendingTransactions.set(txId, { amount, actor: finalActor, description, type, timestamp: Date.now() });
 
-            try {
-                const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', allocated_pocket).single();
-                const finalPocketId = pocketData ? pocketData.id : 1;
+            const formattedAmount = formatIDR(amount);
+            const tipeText = type === 'income' ? 'Pemasukan' : type === 'expense' ? 'Pengeluaran' : 'Transfer';
+            const tipeEmoji = type === 'income' ? '🟢' : type === 'expense' ? '🔴' : '🔵';
+            const actorEmojiPreview = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
 
-                const { error: dbError } = await supabase.from('transactions').insert([{
-                    amount, description, type, pocket_id: finalPocketId, asset_id: 1, actor: finalActor
-                }]);
-                if (dbError) throw dbError;
+            const keyboardButtons = await getPocketButtons(txId);
 
-                const { data: currentPocket } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
-                if (currentPocket) {
-                    const modifier = type === 'expense' ? -1 : 1;
-                    const newBalance = Number(currentPocket.current_balance) + (amount * modifier);
-                    await supabase.from('pockets').update({ current_balance: newBalance }).eq('id', finalPocketId);
-                }
-
-                const actorEmoji = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
-                const aiStatus = getAIStatus();
-                await ctx.replyWithMarkdown(`
-✅ **Data Berhasil Masuk Database!**
-━━━━━━━━━━━━━━━━━━━
-📝 **Deskripsi:** ${description}
-💰 **Nominal:** ${formatIDR(amount)}
-🔄 **Jenis:** ${type === 'expense' ? '🔴 Pengeluaran' : type === 'income' ? '🟢 Pemasukan' : '🔵 Transfer'}
-📂 **Alokasi Pos:** \`${allocated_pocket}\`
-👤 **Eksekutor:** ${actorEmoji}
-🧠 **AI:** ${aiStatus}
-━━━━━━━━━━━━━━━━━━━
-🤖 *Moni telah mengamankan transaksi kamu.*
-`);
-                // Kirim notif email
-                sendTransactionEmailNotification({
-                    actor: finalActor,
-                    amount, description, type,
-                    pocketName: allocated_pocket
-                }).catch(err => console.error('❌ Gagal kirim notif email:', err));
-            } catch (dbError) {
-                console.error("❌ DB Error:", dbError);
-                await ctx.reply("⚠️ Data berhasil dibaca, tapi gagal disimpan ke database, Cuy.");
-            }
+            await ctx.reply(
+                `━━━━━━━━━━━━━━━━━━━\n💳 *KONFIRMASI ALOKASI DANA*\n━━━━━━━━━━━━━━━━━━━\n\n` +
+                `📝 *${description}*\n` +
+                `💰 Nominal: *${formattedAmount}*\n` +
+                `${tipeEmoji} Tipe: *${tipeText}*\n` +
+                `👤 Oleh: ${actorEmojiPreview}\n\n` +
+                `Pilih sumber dana:`,
+                { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboardButtons } }
+            );
+            return;
         } else {
             await ctx.reply(
-                "🤔 *Moni bingung nih...*\n\n" +
-                "Gw gak bisa nangkep nominal dari pesan lu.\n" +
-                "Coba format: \"Beli kopi 35rb pake jajan qisthi\"\n\n" +
-                "💡 Butuh bantuan? Ketik \"help\"",
+                "━━━━━━━━━━━━━━━━━━━\n🤔 *Moni tidak mengerti*\n━━━━━━━━━━━━━━━━━━━\n\n" +
+                "Tidak dapat menemukan nominal transaksi.\n\n" +
+                "📝 *Format yang benar:*\n" +
+                "• \"Beli kopi 35rb\"\n" +
+                "• \"Gaji masuk 5jt\"\n" +
+                "• \"Bayar wifi 350rb\"\n\n" +
+                "💡 Ketik *help* untuk bantuan.",
                 { parse_mode: 'Markdown' }
             );
         }
         return;
     }
 
-    // 12. DEFAULT REPLY
-    const randomReplies = [
-        `Hmm Moni kurang paham nih. 🤔 Mau transaksi? Format: "Beli kopi 35rb pake jajan qisthi"`,
-        `Gimana nih Cuy? Mau catat transaksi, cek saldo, atau bayar tagihan? Ketik "help" buat liat fitur.`,
-        `Moni siap bantu! 💪 Tapi Moni gak ngerti maksudnya. Coba ketik "help" ya.`,
-    ];
-    return await ctx.reply(randomReplies[Math.floor(Math.random() * randomReplies.length)]);
+    // DEFAULT
+    const naturalReply = await generateNaturalResponse(`User berkata: "${pesanAsli}". Arahkan ke "help" jika tidak mengerti.`, userName);
+    return await ctx.reply(naturalReply);
 });
 
 // ==========================================
-// CALLBACK QUERY (TOMBOL KANTONG + BAYAR TAGIHAN + BAYAR CICILAN)
+// CALLBACK QUERY
 // ==========================================
 bot.on('callback_query', async (ctx) => {
     // @ts-ignore
     const callbackData = ctx.callbackQuery.data;
     if (!callbackData) return;
 
-    if (callbackData.startsWith('p_idx:')) {
+    if (callbackData.startsWith('p:')) {
         await ctx.answerCbQuery("⏳ Memproses...");
         const parts = callbackData.split(':');
-        const amount = Number(parts[1]);
-        const actor = parts[2];
-        const selectedPocket = parts[3];
-        const encodedDesc = parts.slice(4).join(':');
-        const description = decodeURIComponent(encodedDesc);
+        const txId = parts[1];
+        const selectedPocket = parts[2];
+
+        const txData = pendingTransactions.get(txId);
+        if (!txData) { await ctx.answerCbQuery("❌ Data expired."); return; }
+
+        const { amount, actor, description, type } = txData;
+        pendingTransactions.delete(txId);
 
         try {
-            const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', selectedPocket).single();
-            const finalPocketId = pocketData ? pocketData.id : 1;
+            const { data: pocketData } = await supabase.from('pockets').select('id, ownership').eq('name', selectedPocket).single();
+            const finalPocketId = pocketData?.id || 1;
+            const transactionType = type || 'expense';
+
             const { error: dbError } = await supabase.from('transactions').insert([{
-                amount, description, type: 'expense', pocket_id: finalPocketId, asset_id: 1, actor
+                amount, description, type: transactionType, pocket_id: finalPocketId, asset_id: 1, actor
             }]);
             if (dbError) throw dbError;
 
             const { data: currentPocket } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
             if (currentPocket) {
-                await supabase.from('pockets').update({ current_balance: Number(currentPocket.current_balance) - amount }).eq('id', finalPocketId);
+                const modifier = transactionType === 'expense' ? -1 : 1;
+                await supabase.from('pockets').update({ current_balance: Number(currentPocket.current_balance) + (amount * modifier) }).eq('id', finalPocketId);
             }
 
             const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
+            const aiStatus = getAIStatus();
+            const pocketIcon = getPocketIcon(pocketData?.ownership || 'bersama');
+            const cleanPocket = formatPocketName(selectedPocket);
+
             await ctx.editMessageText(
-                `✅ **Tersimpan!**\n━━━━━━━━━━━━━━━━━━━\n📝 ${description}\n💰 ${formatIDR(amount)}\n📂 \`${selectedPocket}\`\n👤 ${actorEmoji}`,
+                `━━━━━━━━━━━━━━━━━━━\n✅ *TRANSAKSI BERHASIL*\n━━━━━━━━━━━━━━━━━━━\n\n` +
+                `📝 *${description}*\n` +
+                `💰 Nominal: *${formatIDR(amount)}*\n` +
+                `🔄 Jenis: ${type === 'expense' ? '🔴 Pengeluaran' : type === 'income' ? '🟢 Pemasukan' : '🔵 Transfer'}\n` +
+                `📂 Kantong: ${pocketIcon} ${cleanPocket}\n` +
+                `👤 Eksekutor: ${actorEmoji}\n` +
+                `🧠 AI: ${aiStatus}\n\n` +
+                `━━━━━━━━━━━━━━━━━━━\n🤖 Moni • Tersimpan aman`,
                 { parse_mode: 'Markdown' }
             );
-            sendTransactionEmailNotification({ actor, amount, description, type: 'expense', pocketName: selectedPocket })
-                .catch(err => console.error('❌ Gagal kirim notif email:', err));
+
+            sendTransactionEmailNotification({ actor, amount, description, type: transactionType, pocketName: selectedPocket })
+                .catch(err => console.error('❌ Email gagal:', err));
         } catch (error) {
             console.error("❌ Callback error:", error);
             await ctx.editMessageText("❌ Gagal menyimpan, coba lagi.").catch(() => { });
         }
     }
     else if (callbackData.startsWith('paybill:')) {
-        await ctx.answerCbQuery("⏳ Memproses pembayaran tagihan...");
+        await ctx.answerCbQuery("⏳ Memproses...");
         const parts = callbackData.split(':');
         const amount = Number(parts[1]);
         const actor = parts[2];
@@ -871,29 +884,24 @@ bot.on('callback_query', async (ctx) => {
         try {
             await supabase.from('bills').update({ status: 'paid', last_paid_at: new Date().toISOString() }).eq('id', billId);
             const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', selectedPocket).single();
-            const finalPocketId = pocketData ? pocketData.id : 1;
-            await supabase.from('transactions').insert([{
-                amount, description: `Bayar tagihan: ${billName}`, type: 'expense', pocket_id: finalPocketId, asset_id: 1, actor
-            }]);
-            const { data: currentPocket } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
-            if (currentPocket) {
-                await supabase.from('pockets').update({ current_balance: Number(currentPocket.current_balance) - amount }).eq('id', finalPocketId);
-            }
+            const finalPocketId = pocketData?.id || 1;
+            await supabase.from('transactions').insert([{ amount, description: `Bayar tagihan: ${billName}`, type: 'expense', pocket_id: finalPocketId, asset_id: 1, actor }]);
+            const { data: cp } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
+            if (cp) await supabase.from('pockets').update({ current_balance: Number(cp.current_balance) - amount }).eq('id', finalPocketId);
 
             const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
             await ctx.editMessageText(
-                `✅ **Tagihan Lunas!**\n━━━━━━━━━━━━━━━━━━━\n📝 ${billName}\n💰 ${formatIDR(amount)}\n📂 \`${selectedPocket}\`\n👤 ${actorEmoji}\n\n🎉 Tagihan berhasil dibayar!`,
+                `━━━━━━━━━━━━━━━━━━━\n✅ *TAGIHAN LUNAS!*\n━━━━━━━━━━━━━━━━━━━\n\n📝 ${billName}\n💰 ${formatIDR(amount)}\n📂 ${formatPocketName(selectedPocket)}\n👤 ${actorEmoji}\n\n🎉 Tagihan berhasil dibayar!`,
                 { parse_mode: 'Markdown' }
             );
-            sendTransactionEmailNotification({ actor, amount, description: `Bayar tagihan: ${billName}`, type: 'expense', pocketName: selectedPocket })
-                .catch(err => console.error('❌ Gagal kirim notif email:', err));
+            sendTransactionEmailNotification({ actor, amount, description: `Bayar tagihan: ${billName}`, type: 'expense', pocketName: selectedPocket }).catch(() => {});
         } catch (error) {
             console.error("❌ Paybill error:", error);
             await ctx.editMessageText("❌ Gagal bayar tagihan.").catch(() => { });
         }
     }
     else if (callbackData.startsWith('payinstall:')) {
-        await ctx.answerCbQuery("⏳ Memproses pembayaran cicilan...");
+        await ctx.answerCbQuery("⏳ Memproses...");
         const parts = callbackData.split(':');
         const amount = Number(parts[1]);
         const actor = parts[2];
@@ -903,34 +911,31 @@ bot.on('callback_query', async (ctx) => {
         const installmentName = decodeURIComponent(encodedName);
 
         try {
-            const { data: installment } = await supabase.from('installments').select('paid_months').eq('id', installmentId).single();
-            if (!installment) {
-                await ctx.answerCbQuery("❌ Data cicilan tidak ditemukan.");
-                return;
-            }
-            const newPaidMonths = Number(installment.paid_months) + 1;
+            const { data: inst } = await supabase.from('installments').select('paid_months').eq('id', installmentId).single();
+            if (!inst) { await ctx.answerCbQuery("❌ Data tidak ditemukan."); return; }
+            const newPaidMonths = Number(inst.paid_months) + 1;
             await supabase.from('installments').update({ paid_months: newPaidMonths }).eq('id', installmentId);
             const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', selectedPocket).single();
-            const finalPocketId = pocketData ? pocketData.id : 1;
-            await supabase.from('transactions').insert([{
-                amount, description: `Bayar cicilan: ${installmentName} (Bulan ke-${newPaidMonths})`, type: 'expense', pocket_id: finalPocketId, asset_id: 1, actor
-            }]);
-            const { data: currentPocket } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
-            if (currentPocket) {
-                await supabase.from('pockets').update({ current_balance: Number(currentPocket.current_balance) - amount }).eq('id', finalPocketId);
-            }
+            const finalPocketId = pocketData?.id || 1;
+            await supabase.from('transactions').insert([{ amount, description: `Bayar cicilan: ${installmentName} (Bln ke-${newPaidMonths})`, type: 'expense', pocket_id: finalPocketId, asset_id: 1, actor }]);
+            const { data: cp } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
+            if (cp) await supabase.from('pockets').update({ current_balance: Number(cp.current_balance) - amount }).eq('id', finalPocketId);
 
             const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
             await ctx.editMessageText(
-                `✅ **Cicilan Dibayar!**\n━━━━━━━━━━━━━━━━━━━\n📝 ${installmentName}\n💰 ${formatIDR(amount)}\n📊 Bulan ke: ${newPaidMonths}\n📂 \`${selectedPocket}\`\n👤 ${actorEmoji}\n\n🏠 Satu bulan lagi terbayar!`,
+                `━━━━━━━━━━━━━━━━━━━\n✅ *CICILAN DIBAYAR!*\n━━━━━━━━━━━━━━━━━━━\n\n📝 ${installmentName}\n💰 ${formatIDR(amount)}\n📊 Bulan ke-${newPaidMonths}\n📂 ${formatPocketName(selectedPocket)}\n👤 ${actorEmoji}\n\n🏠 Satu bulan lagi terbayar!`,
                 { parse_mode: 'Markdown' }
             );
-            sendTransactionEmailNotification({ actor, amount, description: `Bayar cicilan: ${installmentName} (Bulan ke-${newPaidMonths})`, type: 'expense', pocketName: selectedPocket })
-                .catch(err => console.error('❌ Gagal kirim notif email:', err));
+            sendTransactionEmailNotification({ actor, amount, description: `Bayar cicilan: ${installmentName}`, type: 'expense', pocketName: selectedPocket }).catch(() => {});
         } catch (error) {
             console.error("❌ Payinstall error:", error);
             await ctx.editMessageText("❌ Gagal bayar cicilan.").catch(() => { });
         }
+    }
+    else if (callbackData.startsWith('cancel:')) {
+        pendingTransactions.delete(callbackData.split(':')[1]);
+        await ctx.answerCbQuery("Dibatalkan.");
+        await ctx.editMessageText("❌ Transaksi dibatalkan.").catch(() => { });
     }
     else if (callbackData === 'cancel_bill' || callbackData === 'cancel_install') {
         await ctx.answerCbQuery("Dibatalkan.");
@@ -943,7 +948,7 @@ bot.on('callback_query', async (ctx) => {
 // ==========================================
 bot.on('photo', async (ctx) => {
     try {
-        await ctx.reply("📸 Moni lagi baca struknya...");
+        await ctx.reply("📸 Moni sedang membaca struk...");
         const photo = ctx.message.photo[ctx.message.photo.length - 1];
         const fileUrl = await ctx.telegram.getFileLink(photo.file_id);
         const response = await axios.get(fileUrl.href, { responseType: 'arraybuffer', timeout: 10000 });
@@ -951,62 +956,45 @@ bot.on('photo', async (ctx) => {
         const hasilParse = await parseFinancialImage(imageBuffer, 'image/jpeg');
 
         if (hasilParse) {
-            const { amount, description, type, allocated_pocket } = hasilParse;
-            const finalActor = ctx.state.actor;
+            const { amount, description, type, actor: aiActor } = hasilParse;
+            const finalActor = aiActor === 'auto' ? ctx.state.actor : aiActor;
 
-            if (allocated_pocket === 'ASK_USER') {
-                const encodedDesc = encodeURIComponent(description);
-                await ctx.reply(
-                    `🤔 **Moni ragu...**\n*"${description}"* sebesar *${formatIDR(amount)}* masuk kantong mana?`,
-                    {
-                        parse_mode: 'Markdown',
-                        reply_markup: {
-                            inline_keyboard: [
-                                [{ text: '🌐 Kantong Bersama', callback_data: `p_idx:${amount}:${finalActor}:operasional_utama:${encodedDesc}` }],
-                                [
-                                    { text: '🧑 Jajan Qisthi', callback_data: `p_idx:${amount}:${finalActor}:jajan_qisthi:${encodedDesc}` },
-                                    { text: '👩 Jajan Gita', callback_data: `p_idx:${amount}:${finalActor}:jajan_gita:${encodedDesc}` }
-                                ]
-                            ]
-                        }
-                    }
-                );
-                return;
-            }
+            const txId = 'img' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+            pendingTransactions.set(txId, { amount, actor: finalActor, description, type, timestamp: Date.now() });
 
-            const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', allocated_pocket).single();
-            const finalPocketId = pocketData ? pocketData.id : 1;
-            await supabase.from('transactions').insert([{ amount, description, type, pocket_id: finalPocketId, asset_id: 1, actor: finalActor }]);
-            const { data: currentPocket } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
-            if (currentPocket) {
-                await supabase.from('pockets').update({ current_balance: Number(currentPocket.current_balance) - amount }).eq('id', finalPocketId);
-            }
+            const formattedAmount = formatIDR(amount);
+            const actorEmojiPreview = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
+            const keyboardButtons = await getPocketButtons(txId);
 
-            const actorEmoji = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
-            await ctx.replyWithMarkdown(`
-✅ **Struk Tercatat!**
-━━━━━━━━━━━━━━━━━━━
-📝 ${description}
-💰 ${formatIDR(amount)}
-📂 \`${allocated_pocket}\`
-👤 ${actorEmoji}
-🤖 *Moni amankan.*
-            `);
-            sendTransactionEmailNotification({ actor: finalActor, amount, description, type, pocketName: allocated_pocket })
-                .catch(err => console.error('❌ Gagal kirim notif email:', err));
+            await ctx.reply(
+                `━━━━━━━━━━━━━━━━━━━\n💳 *KONFIRMASI ALOKASI DANA (STRUK)*\n━━━━━━━━━━━━━━━━━━━\n\n` +
+                `📝 *${description}*\n` +
+                `💰 Nominal: *${formattedAmount}*\n` +
+                `🔴 Tipe: *Pengeluaran*\n` +
+                `👤 Oleh: ${actorEmojiPreview}\n\n` +
+                `Pilih sumber dana:`,
+                { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboardButtons } }
+            );
+            return;
         } else {
-            await ctx.reply("❌ Gagal baca struk, Cuy.");
+            await ctx.reply(
+                "━━━━━━━━━━━━━━━━━━━\n❌ *GAGAL MEMBACA STRUK*\n━━━━━━━━━━━━━━━━━━━\n\n" +
+                "Moni tidak dapat membaca struk ini.\n\n" +
+                "📝 *Alternatif:* Ketik manual\n" +
+                "Contoh: \"Belanja di Indomaret 85rb\"",
+                { parse_mode: 'Markdown' }
+            );
         }
     } catch (error) {
         console.error("❌ Error foto:", error);
-        await ctx.reply("❌ Gangguan teknis pas baca struk.");
+        await ctx.reply("❌ Gangguan teknis saat membaca struk.");
     }
 });
 
 // ==========================================
 // COMMANDS
 // ==========================================
-bot.command('saldo', async (ctx) => { await ctx.reply("🔍 Menghitung saldo..."); return await handleCekSaldo(ctx); });
+bot.command('saldo', async (ctx) => { await ctx.reply("🔍 Memeriksa saldo..."); return await handleCekSaldo(ctx); });
 bot.command('ringkasan', async (ctx) => { return await handleRingkasan(ctx); });
 bot.command('bayar', async (ctx) => {
     const input = ctx.message.text.replace('/bayar', '').trim();
@@ -1021,18 +1009,15 @@ bot.command('cicil', async (ctx) => {
 bot.command('laporan', async (ctx) => { return await handleLaporan(ctx); });
 bot.command('help', async (ctx) => {
     return await ctx.reply(
-        `🤖 *Moni - Asisten Keuangan Keluarga*\n\n` +
-        `📝 *Fitur yang tersedia:*\n\n` +
-        `💰 *Cek Saldo*\nKetik "/saldo" atau "cek saldo"\n\n` +
-        `📊 *Ringkasan Bulanan*\nKetik "/ringkasan" atau "ringkasan"\n\n` +
-        `🧾 *Bayar Tagihan*\nKetik "/bayar wifi" atau "bayar listrik"\n\n` +
-        `🏠 *Bayar Cicilan*\nKetik "/cicil motor" atau "bayar cicilan rumah"\n\n` +
-        `📁 *Download Laporan CSV*\nKetik "/laporan" atau "export"\n\n` +
-        `📝 *Catat Transaksi*\n"Beli kopi 35rb pake jajan qisthi"\n\n` +
-        `📸 *Struk Belanja*\nKirim foto struk/nota\n\n` +
-        `💬 *Ngobrol Santai*\n"Hai Moni!" atau curhat apa aja\n\n` +
-        `━━━━━━━━━━━━━━━━━━━\n` +
-        `🤖 *Moni siap bantu 24/7!* 🚀`,
+        `━━━━━━━━━━━━━━━━━━━\n🤖 *MONI - ASISTEN KEUANGAN*\n━━━━━━━━━━━━━━━━━━━\n\n` +
+        `💰 *Cek Saldo*\n/saldo atau "saldo"\n\n` +
+        `📊 *Ringkasan Bulanan*\n/ringkasan atau "rekap"\n\n` +
+        `🧾 *Bayar Tagihan*\n/bayar [nama] atau "bayar wifi"\n\n` +
+        `🏠 *Bayar Cicilan*\n/cicil [nama] atau "cicil motor"\n\n` +
+        `📁 *Laporan CSV*\n/laporan atau "export"\n\n` +
+        `📝 *Catat Transaksi*\n"Beli kopi 35rb"\n\n` +
+        `📸 *Struk Belanja*\nKirim foto langsung\n\n` +
+        `━━━━━━━━━━━━━━━━━━━\n🤖 Moni siap bantu 24/7! 🚀`,
         { parse_mode: 'Markdown' }
     );
 });
