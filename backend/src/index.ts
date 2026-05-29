@@ -10,8 +10,7 @@ import { sendTransactionEmailNotification } from './services/notificationService
 import { setBotInstance, startCronJobs } from './services/cronService.js';
 
 dotenv.config();
-const geminiApiKey = process.env.GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(geminiApiKey || '');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -25,9 +24,6 @@ if (!botToken) {
 }
 
 const bot = new Telegraf(botToken);
-
-const geminiApiKey = process.env.GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(geminiApiKey || '');
 
 let ALLOWED_USERS: Record<string, string> = {};
 try {
@@ -594,7 +590,6 @@ bot.on('text', async (ctx) => {
     if (pesan.startsWith('/')) return;
 
     // 2. KEYWORD BAYAR CICILAN (HARUS DI ATAS BAYAR TAGIHAN!)
-    // Cek dulu apakah ini "bayar cicilan" sebelum dicek sebagai "bayar tagihan"
     if (pesan === 'cicil' || pesan === 'cicilan' || pesan === 'bayar cicilan') {
         return await handleListCicilan(ctx);
     }
@@ -605,20 +600,16 @@ bot.on('text', async (ctx) => {
         return await handleBayarCicilan(ctx, namaCicilan);
     }
 
-    // 3. KEYWORD BAYAR TAGIHAN (BARU SETELAH CICILAN)
-    // Cek dulu apakah ini "bayar tagihan" doang
+    // 3. KEYWORD BAYAR TAGIHAN
     if (pesan === 'bayar' || pesan === 'bayarin' || pesan === 'bayar tagihan' || pesan === 'tagihan') {
         return await handleListTagihan(ctx);
     }
 
     if (pesan.startsWith('bayar ') || pesan.startsWith('bayarin ')) {
         const namaTagihan = pesan.replace(/^bayar(in)?\s+/, '').trim();
-
-        // Skip kalau ini cicilan (udah ditangani di atas)
         if (namaTagihan === 'cicilan') {
             return await handleListCicilan(ctx);
         }
-
         console.log(`🔍 Bayar tagihan: "${namaTagihan}"`);
         return await handleBayarTagihan(ctx, namaTagihan);
     }
@@ -665,7 +656,7 @@ bot.on('text', async (ctx) => {
         );
     }
 
-    // 8. KEYWORD SAPAAN (LANGSUNG JAWAB, SKIP GEMINI) - PERBANYAK DEFAULT
+    // 8. KEYWORD SAPAAN
     const sapaanKeywords = ['hai', 'halo', 'hello', 'hi', 'woi', 'eh', 'p', 'pagi', 'siang', 'sore', 'malam', 'assalamualaikum', 'test', 'tes', 'oy', 'oi', 'hallo', 'hewwo', 'hy', 'yo', 'wow', 'halo moni', 'hai moni', 'p moni'];
     const isSapaanOnly = sapaanKeywords.some(k => pesan === k || pesan.startsWith(k + ' ') || pesan.endsWith(' ' + k));
 
@@ -690,7 +681,7 @@ bot.on('text', async (ctx) => {
         return await ctx.reply(sapaanList[Math.floor(Math.random() * sapaanList.length)]);
     }
 
-    // 9. KEYWORD PERTANYAAN UMUM (SKIP GEMINI)
+    // 9. KEYWORD PERTANYAAN UMUM
     const tanyaKeywords = ['apa kabar', 'gimana', 'bagaimana', 'lagi apa', 'kamu siapa', 'lagi ngapain', 'sehat', 'baik'];
     if (tanyaKeywords.some(k => pesan.includes(k))) {
         const jawabanList = [
@@ -701,30 +692,29 @@ bot.on('text', async (ctx) => {
         return await ctx.reply(jawabanList[Math.floor(Math.random() * jawabanList.length)]);
     }
 
-    // 10. DETEKSI APAKAH INI TRANSAKSI (CEK NOMINAL)
+    // 10. DETEKSI TRANSAKSI
     const punyaNominal = /\d+[.,]?\d*\s*(rb|ribu|k|jt|juta|m|milyar|miliar)?/i.test(pesan);
     const transaksiKeywords = /beli|bayar|jajan|makan|minum|belanja|transfer|masuk|gaji|bonus|topup|isi|pulsa|servis|bensin|parkir|tagihan|cicil/i.test(pesan);
-
     const isKemungkinanTransaksi = punyaNominal || transaksiKeywords;
 
-    // 11. PROSES TRANSAKSI - COBA GEMINI DULU, FALLBACK KE MANUAL
+    // 11. PROSES TRANSAKSI (GROQ/GEMINI -> FALLBACK MANUAL)
     if (isKemungkinanTransaksi) {
         await ctx.reply("⏳ Sebentar ya, Moni catat transaksinya...");
 
         let hasilParse = null;
-        let geminiAvailable = true;
+        let aiAvailable = true;
 
-        // Coba Gemini dulu
+        // Coba AI service (Groq atau Gemini)
         try {
             hasilParse = await parseFinancialText(pesanAsli);
             if (!hasilParse) {
-                console.log('⚠️ Gemini return null, fallback ke manual...');
+                console.log('⚠️ AI return null, fallback ke manual...');
             }
-        } catch (geminiError: any) {
-            console.log('⚠️ Gemini error, fallback ke parser manual...');
-            if (geminiError?.status === 429) {
-                geminiAvailable = false;
-                await ctx.reply('⚠️ *Notif:* Gemini AI lagi limit (free tier), Moni pake parser manual dulu ya. Hasilnya mungkin kurang akurat.', { parse_mode: 'Markdown' });
+        } catch (aiError: any) {
+            console.log('⚠️ AI error, fallback ke parser manual...');
+            if (aiError?.status === 429) {
+                aiAvailable = false;
+                await ctx.reply('⚠️ *Notif:* AI lagi limit, Moni pake parser manual dulu ya.', { parse_mode: 'Markdown' });
             }
         }
 
@@ -744,7 +734,6 @@ bot.on('text', async (ctx) => {
             if (allocated_pocket === 'ASK_USER') {
                 const formattedAmount = formatIDR(amount);
                 const encodedDesc = encodeURIComponent(description);
-
                 await ctx.reply(
                     `🤔 **Moni Ragu-Ragu...**\n\n` +
                     `Transaksi *"${description}"* sebesar *${formattedAmount}* mau dipotong dari kantong mana nih?`,
@@ -783,7 +772,6 @@ bot.on('text', async (ctx) => {
                 }
 
                 const actorEmoji = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
-
                 const aiStatus = getAIStatus();
                 await ctx.replyWithMarkdown(`
 ✅ **Data Berhasil Masuk Database!**
@@ -796,14 +784,11 @@ bot.on('text', async (ctx) => {
 🧠 **AI:** ${aiStatus}
 ━━━━━━━━━━━━━━━━━━━
 🤖 *Moni telah mengamankan transaksi kamu.*
-`
-
-                // 🔔 KIRIM NOTIFIKASI EMAIL
+`);
+                // Kirim notif email
                 sendTransactionEmailNotification({
                     actor: finalActor,
-                    amount: amount,
-                    description: description,
-                    type: type,
+                    amount, description, type,
                     pocketName: allocated_pocket
                 }).catch(err => console.error('❌ Gagal kirim notif email:', err));
             } catch (dbError) {
@@ -819,11 +804,10 @@ bot.on('text', async (ctx) => {
                 { parse_mode: 'Markdown' }
             );
         }
-
-        return; // PENTING: return setelah proses transaksi
+        return;
     }
 
-    // 12. KALAU BUKAN TRANSAKSI & BUKAN SAPAAN, JAWAB DEFAULT
+    // 12. DEFAULT REPLY
     const randomReplies = [
         `Hmm Moni kurang paham nih. 🤔 Mau transaksi? Format: "Beli kopi 35rb pake jajan qisthi"`,
         `Gimana nih Cuy? Mau catat transaksi, cek saldo, atau bayar tagihan? Ketik "help" buat liat fitur.`,
@@ -840,7 +824,6 @@ bot.on('callback_query', async (ctx) => {
     const callbackData = ctx.callbackQuery.data;
     if (!callbackData) return;
 
-    // --- TOMBOL PILIH KANTONG (TRANSAKSI BIASA) ---
     if (callbackData.startsWith('p_idx:')) {
         await ctx.answerCbQuery("⏳ Memproses...");
         const parts = callbackData.split(':');
@@ -853,7 +836,6 @@ bot.on('callback_query', async (ctx) => {
         try {
             const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', selectedPocket).single();
             const finalPocketId = pocketData ? pocketData.id : 1;
-
             const { error: dbError } = await supabase.from('transactions').insert([{
                 amount, description, type: 'expense', pocket_id: finalPocketId, asset_id: 1, actor
             }]);
@@ -861,8 +843,7 @@ bot.on('callback_query', async (ctx) => {
 
             const { data: currentPocket } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
             if (currentPocket) {
-                const newBalance = Number(currentPocket.current_balance) - amount;
-                await supabase.from('pockets').update({ current_balance: newBalance }).eq('id', finalPocketId);
+                await supabase.from('pockets').update({ current_balance: Number(currentPocket.current_balance) - amount }).eq('id', finalPocketId);
             }
 
             const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
@@ -870,21 +851,13 @@ bot.on('callback_query', async (ctx) => {
                 `✅ **Tersimpan!**\n━━━━━━━━━━━━━━━━━━━\n📝 ${description}\n💰 ${formatIDR(amount)}\n📂 \`${selectedPocket}\`\n👤 ${actorEmoji}`,
                 { parse_mode: 'Markdown' }
             );
-            // 🔔 KIRIM NOTIFIKASI EMAIL (TAMBAHIN INI)
-            sendTransactionEmailNotification({
-                actor: actor,
-                amount: amount,
-                description: description,
-                type: 'expense',
-                pocketName: selectedPocket
-            }).catch(err => console.error('❌ Gagal kirim notif email:', err));
+            sendTransactionEmailNotification({ actor, amount, description, type: 'expense', pocketName: selectedPocket })
+                .catch(err => console.error('❌ Gagal kirim notif email:', err));
         } catch (error) {
             console.error("❌ Callback error:", error);
             await ctx.editMessageText("❌ Gagal menyimpan, coba lagi.").catch(() => { });
         }
     }
-
-    // --- TOMBOL BAYAR TAGIHAN ---
     else if (callbackData.startsWith('paybill:')) {
         await ctx.answerCbQuery("⏳ Memproses pembayaran tagihan...");
         const parts = callbackData.split(':');
@@ -896,28 +869,15 @@ bot.on('callback_query', async (ctx) => {
         const billName = decodeURIComponent(encodedName);
 
         try {
-            await supabase.from('bills').update({
-                status: 'paid',
-                last_paid_at: new Date().toISOString()
-            }).eq('id', billId);
-
+            await supabase.from('bills').update({ status: 'paid', last_paid_at: new Date().toISOString() }).eq('id', billId);
             const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', selectedPocket).single();
             const finalPocketId = pocketData ? pocketData.id : 1;
-
             await supabase.from('transactions').insert([{
-                amount,
-                description: `Bayar tagihan: ${billName}`,
-                type: 'expense',
-                pocket_id: finalPocketId,
-                asset_id: 1,
-                actor
+                amount, description: `Bayar tagihan: ${billName}`, type: 'expense', pocket_id: finalPocketId, asset_id: 1, actor
             }]);
-
             const { data: currentPocket } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
             if (currentPocket) {
-                await supabase.from('pockets').update({
-                    current_balance: Number(currentPocket.current_balance) - amount
-                }).eq('id', finalPocketId);
+                await supabase.from('pockets').update({ current_balance: Number(currentPocket.current_balance) - amount }).eq('id', finalPocketId);
             }
 
             const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
@@ -925,21 +885,13 @@ bot.on('callback_query', async (ctx) => {
                 `✅ **Tagihan Lunas!**\n━━━━━━━━━━━━━━━━━━━\n📝 ${billName}\n💰 ${formatIDR(amount)}\n📂 \`${selectedPocket}\`\n👤 ${actorEmoji}\n\n🎉 Tagihan berhasil dibayar!`,
                 { parse_mode: 'Markdown' }
             );
-            // 🔔 KIRIM NOTIFIKASI EMAIL (TAMBAHIN INI)
-            sendTransactionEmailNotification({
-                actor: actor,
-                amount: amount,
-                description: `Bayar tagihan: ${billName}`,
-                type: 'expense',
-                pocketName: selectedPocket
-            }).catch(err => console.error('❌ Gagal kirim notif email:', err));
+            sendTransactionEmailNotification({ actor, amount, description: `Bayar tagihan: ${billName}`, type: 'expense', pocketName: selectedPocket })
+                .catch(err => console.error('❌ Gagal kirim notif email:', err));
         } catch (error) {
             console.error("❌ Paybill error:", error);
             await ctx.editMessageText("❌ Gagal bayar tagihan.").catch(() => { });
         }
     }
-
-    // --- TOMBOL BAYAR CICILAN ---
     else if (callbackData.startsWith('payinstall:')) {
         await ctx.answerCbQuery("⏳ Memproses pembayaran cicilan...");
         const parts = callbackData.split(':');
@@ -952,35 +904,20 @@ bot.on('callback_query', async (ctx) => {
 
         try {
             const { data: installment } = await supabase.from('installments').select('paid_months').eq('id', installmentId).single();
-
             if (!installment) {
                 await ctx.answerCbQuery("❌ Data cicilan tidak ditemukan.");
                 return;
             }
-
             const newPaidMonths = Number(installment.paid_months) + 1;
-
-            await supabase.from('installments').update({
-                paid_months: newPaidMonths,
-            }).eq('id', installmentId);
-
+            await supabase.from('installments').update({ paid_months: newPaidMonths }).eq('id', installmentId);
             const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', selectedPocket).single();
             const finalPocketId = pocketData ? pocketData.id : 1;
-
             await supabase.from('transactions').insert([{
-                amount,
-                description: `Bayar cicilan: ${installmentName} (Bulan ke-${newPaidMonths})`,
-                type: 'expense',
-                pocket_id: finalPocketId,
-                asset_id: 1,
-                actor
+                amount, description: `Bayar cicilan: ${installmentName} (Bulan ke-${newPaidMonths})`, type: 'expense', pocket_id: finalPocketId, asset_id: 1, actor
             }]);
-
             const { data: currentPocket } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
             if (currentPocket) {
-                await supabase.from('pockets').update({
-                    current_balance: Number(currentPocket.current_balance) - amount
-                }).eq('id', finalPocketId);
+                await supabase.from('pockets').update({ current_balance: Number(currentPocket.current_balance) - amount }).eq('id', finalPocketId);
             }
 
             const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
@@ -988,21 +925,13 @@ bot.on('callback_query', async (ctx) => {
                 `✅ **Cicilan Dibayar!**\n━━━━━━━━━━━━━━━━━━━\n📝 ${installmentName}\n💰 ${formatIDR(amount)}\n📊 Bulan ke: ${newPaidMonths}\n📂 \`${selectedPocket}\`\n👤 ${actorEmoji}\n\n🏠 Satu bulan lagi terbayar!`,
                 { parse_mode: 'Markdown' }
             );
-            // 🔔 KIRIM NOTIFIKASI EMAIL (TAMBAHIN INI)
-            sendTransactionEmailNotification({
-                actor: actor,
-                amount: amount,
-                description: `Bayar cicilan: ${installmentName} (Bulan ke-${newPaidMonths})`,
-                type: 'expense',
-                pocketName: selectedPocket
-            }).catch(err => console.error('❌ Gagal kirim notif email:', err));
+            sendTransactionEmailNotification({ actor, amount, description: `Bayar cicilan: ${installmentName} (Bulan ke-${newPaidMonths})`, type: 'expense', pocketName: selectedPocket })
+                .catch(err => console.error('❌ Gagal kirim notif email:', err));
         } catch (error) {
             console.error("❌ Payinstall error:", error);
             await ctx.editMessageText("❌ Gagal bayar cicilan.").catch(() => { });
         }
     }
-
-    // --- TOMBOL BATAL ---
     else if (callbackData === 'cancel_bill' || callbackData === 'cancel_install') {
         await ctx.answerCbQuery("Dibatalkan.");
         await ctx.editMessageText("❌ Pembayaran dibatalkan.").catch(() => { });
@@ -1048,7 +977,6 @@ bot.on('photo', async (ctx) => {
             const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', allocated_pocket).single();
             const finalPocketId = pocketData ? pocketData.id : 1;
             await supabase.from('transactions').insert([{ amount, description, type, pocket_id: finalPocketId, asset_id: 1, actor: finalActor }]);
-
             const { data: currentPocket } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
             if (currentPocket) {
                 await supabase.from('pockets').update({ current_balance: Number(currentPocket.current_balance) - amount }).eq('id', finalPocketId);
@@ -1064,14 +992,8 @@ bot.on('photo', async (ctx) => {
 👤 ${actorEmoji}
 🤖 *Moni amankan.*
             `);
-            // 🔔 KIRIM NOTIFIKASI EMAIL (TAMBAHIN INI)
-            sendTransactionEmailNotification({
-                actor: finalActor,
-                amount: amount,
-                description: description,
-                type: type,
-                pocketName: allocated_pocket
-            }).catch(err => console.error('❌ Gagal kirim notif email:', err));
+            sendTransactionEmailNotification({ actor: finalActor, amount, description, type, pocketName: allocated_pocket })
+                .catch(err => console.error('❌ Gagal kirim notif email:', err));
         } else {
             await ctx.reply("❌ Gagal baca struk, Cuy.");
         }
@@ -1084,35 +1006,19 @@ bot.on('photo', async (ctx) => {
 // ==========================================
 // COMMANDS
 // ==========================================
-bot.command('saldo', async (ctx) => {
-    await ctx.reply("🔍 Menghitung saldo...");
-    return await handleCekSaldo(ctx);
-});
-
-bot.command('ringkasan', async (ctx) => {
-    return await handleRingkasan(ctx);
-});
-
+bot.command('saldo', async (ctx) => { await ctx.reply("🔍 Menghitung saldo..."); return await handleCekSaldo(ctx); });
+bot.command('ringkasan', async (ctx) => { return await handleRingkasan(ctx); });
 bot.command('bayar', async (ctx) => {
     const input = ctx.message.text.replace('/bayar', '').trim();
-    if (!input) {
-        return await handleListTagihan(ctx);
-    }
+    if (!input) return await handleListTagihan(ctx);
     return await handleBayarTagihan(ctx, input);
 });
-
 bot.command('cicil', async (ctx) => {
     const input = ctx.message.text.replace('/cicil', '').trim();
-    if (!input) {
-        return await handleListCicilan(ctx);
-    }
+    if (!input) return await handleListCicilan(ctx);
     return await handleBayarCicilan(ctx, input);
 });
-
-bot.command('laporan', async (ctx) => {
-    return await handleLaporan(ctx);
-});
-
+bot.command('laporan', async (ctx) => { return await handleLaporan(ctx); });
 bot.command('help', async (ctx) => {
     return await ctx.reply(
         `🤖 *Moni - Asisten Keuangan Keluarga*\n\n` +
@@ -1138,11 +1044,7 @@ console.log('🤖 Menghubungkan ke Bot Telegram...');
 bot.launch()
     .then(() => {
         console.log('✅ Bot Telegram aktif!');
-
-        // Set bot instance untuk cron
         setBotInstance(bot);
-
-        // Jalankan cron job
         startCronJobs();
     })
     .catch((err) => console.error('❌ Gagal:', err));
