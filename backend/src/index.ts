@@ -7,7 +7,8 @@ import { parseFinancialText, parseFinancialImage, getAIStatus } from './services
 import { supabase } from './config/supabaseClient.js';
 import { Readable } from 'stream';
 import { sendTransactionEmailNotification } from './services/notificationService.js';
-import { setBotInstance, startCronJobs } from './services/cronService.js';
+import { setBotInstance, startCronJobs, checkDueBills, checkDueInstallments } from './services/cronService.js';
+
 
 dotenv.config();
 
@@ -1405,6 +1406,33 @@ bot.launch()
     .catch((err) => console.error('❌ Gagal:', err));
 
 app.get('/', (req, res) => res.send('Backend Running! 🚀'));
+// Endpoint khusus untuk memicu notifikasi dari Cron-Job.org (Bypass Sleep Free Tier)
+app.get('/api/trigger-bill-check', async (req, res) => {
+  try {
+    console.log("⏰ Pemicu eksternal terdeteksi: Memulai pengecekan tagihan dan cicilan harian...");
+    
+    // Eksekusi fungsi pengecekan tagihan
+    if (typeof checkDueBills === 'function') {
+      await checkDueBills();
+    }
+    
+    // Eksekusi fungsi pengecekan cicilan
+    if (typeof checkDueInstallments === 'function') {
+      await checkDueInstallments();
+    }
+    
+    return res.status(200).json({ 
+      success: true, 
+      message: "Notifikasi tagihan & cicilan berhasil diproses dan dikirim ke Telegram!" 
+    });
+  } catch (error) {
+    console.error("❌ Eror saat memicu notifikasi keuangan:", error);
+    return res.status(500).json({ 
+      success: false, 
+      error: "Internal Server Error saat memproses notifikasi" 
+    });
+  }
+});
 app.listen(PORT, () => console.log(`Server di http://localhost:${PORT}`));
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
