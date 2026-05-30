@@ -1,14 +1,19 @@
 {
-  "name": "Monify",
-  "short_name": "Moni",
-  "description": "Monify - Family Finance Assistant",
+  "id": "/",
+  "name": "Monify - Family Finance Assistant",
+  "short_name": "Monify",
+  "description": "Asisten keuangan keluarga untuk Qisthi & Gita",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "fullscreen"],
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
-  "orientation": "portrait",
+  "orientation": "any",
+  "categories": ["finance", "productivity"],
   "lang": "id-ID",
+  "dir": "ltr",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icon-192.png",
