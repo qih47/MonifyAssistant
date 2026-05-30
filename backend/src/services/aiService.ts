@@ -89,6 +89,11 @@ Aturan:
   * goal_name: string (Ambil MURNI nama barangnya saja TANPA kata kerja seperti 'Beli' atau 'Buat' di depannya. Contoh jika "Nabung Air Purifier" -> cukup isi "Air Purifier", jika "nabung beli kulkas" -> cukup isi "Kulkas", gunakan Title Case yang bersih)
   * type: "transfer"
   * category: "investasi_tabungan"
+- Jika teks berupa "transfer ke [nama_asset] [nominal]" atau "transfer dari [nama_asset] ke [nama_asset] [nominal]" atau "pindahin ke [nama_asset] [nominal]", maka:
+  * type: "transfer"
+  * allocated_pocket: "ASK_USER"
+  * category: "transfer_antar_asset"
+  * description: "Transfer ke [Nama Asset]" atau "Transfer dari [Asset A] ke [Asset B]"
 JANGAN tambahkan teks apapun selain JSON.`
                 },
                 { role: 'user', content: text }

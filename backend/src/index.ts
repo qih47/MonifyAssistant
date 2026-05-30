@@ -283,13 +283,13 @@ async function checkAndNotifyLowFund(ctx: any, pocketName: string, newBalance: n
         // 🚨 THRESHOLD CONFIGURATION
         const LOW_FUND_THRESHOLD = 2000000; // 2 juta = warning threshold
         const CRITICAL_THRESHOLD = 1000000; // 1 juta = critical alert
-        
+
         if (newBalance < CRITICAL_THRESHOLD) {
             // CRITICAL ALERT 🔴
             const icon = "🔴 KRITIS!";
             const warningMsg = `${icon} Kantong *${formatPocketName(pocketName)}* SUDAH TINGGAL *${formatIDR(newBalance)}*!\n\n⚠️ BAHAYA OVERDRAFT! Jangan ada pengeluaran lagi sampai ada dana masuk!`;
             await ctx.replyWithMarkdown(warningMsg);
-            
+
             // Also send email alert to family
             await sendTransactionEmailNotification({
                 actor,
@@ -297,7 +297,7 @@ async function checkAndNotifyLowFund(ctx: any, pocketName: string, newBalance: n
                 description: `⚠️ ALERT: Kantong ${formatPocketName(pocketName)} KRITIS (${formatIDR(newBalance)})`,
                 type: 'alert',
                 pocketName
-            }).catch(() => {});
+            }).catch(() => { });
         } else if (newBalance < LOW_FUND_THRESHOLD) {
             // WARNING ALERT 🟡
             const icon = "🟡 PERHATIAN";
@@ -639,6 +639,64 @@ async function handleLaporan(ctx: any) {
 }
 
 // ==========================================
+// HELPER: Transfer Antar Asset
+// ==========================================
+async function handleTransferAsset(ctx: any, text: string) {
+    try {
+        const match = text.match(/(?:transfer\s+(?:ke|dari)\s+|pindah(?:in)?\s+(?:ke|dari)\s+|kirim\s+ke\s+|tf\s+ke\s+)(.+?)\s+(\d+[.,]?\d*)\s*(rb|ribu|k|jt|juta|m|milyar|miliar)?/i);
+
+        if (!match) {
+            return ctx.reply("Format: `transfer ke [nama asset] [nominal]`\nContoh: `transfer ke mandiri istri 5jt`", { parse_mode: 'Markdown' });
+        }
+
+        const targetAssetName = match[1].trim();
+        let amount = Number(match[2].replace(',', '.'));
+        const unit = match[3]?.toLowerCase();
+        if (unit === 'rb' || unit === 'ribu' || unit === 'k') amount *= 1000;
+        else if (unit === 'jt' || unit === 'juta') amount *= 1000000;
+
+        // Cari asset target
+        const { data: targetAsset } = await supabase.from('assets').select('*').ilike('name', `%${targetAssetName}%`).single();
+        if (!targetAsset) {
+            return ctx.reply(`❌ Asset *"${targetAssetName}"* tidak ditemukan.`, { parse_mode: 'Markdown' });
+        }
+
+        // Ambil asset sumber (berdasarkan actor)
+        const actor = ctx.state.actor;
+        const { data: sourceAsset } = await supabase.from('assets').select('*').ilike('name', actor === 'suami' ? '%qisthi%' : '%gita%').eq('ownership', actor).single();
+        if (!sourceAsset) return ctx.reply(`❌ Asset sumber tidak ditemukan.`);
+
+        if (Number(sourceAsset.balance) < amount) {
+            return ctx.reply(`❌ Saldo *${sourceAsset.name}* tidak cukup!\nSisa: *${formatIDR(Number(sourceAsset.balance))}*\nButuh: *${formatIDR(amount)}*`, { parse_mode: 'Markdown' });
+        }
+
+        const txId = 'tfa' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+        pendingTransactions.set(txId, {
+            amount, actor, description: `Transfer ke ${targetAsset.name}`, type: 'transfer',
+            timestamp: Date.now(), category: 'transfer_antar_asset', merchant: targetAsset.name,
+            transaction_date: new Date().toISOString()
+        });
+
+        await ctx.reply(
+            `💸 *KONFIRMASI TRANSFER ASSET*\n\n` +
+            `📤 Dari: *${sourceAsset.name}*\n📥 Ke: *${targetAsset.name}*\n💰 Nominal: *${formatIDR(amount)}*\n👤 Oleh: ${actor === 'suami' ? '🧑 Qisthi' : '👩 Gita'}\n\nLanjutkan?`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '✅ Ya, Transfer!', callback_data: `tfa:${txId}:${targetAsset.id}:${sourceAsset.id}` }],
+                        [{ text: '❌ Batal', callback_data: `cancel:${txId}` }]
+                    ]
+                }
+            }
+        );
+    } catch (err) {
+        console.error("❌ Gagal transfer asset:", err);
+        await ctx.reply("⚠️ Error saat memproses transfer.");
+    }
+}
+
+// ==========================================
 // HELPER: Parser Manual
 // ==========================================
 function parseTransactionManual(text: string): { amount: number; description: string; type: string; allocated_pocket: string; actor: string; category: string; merchant: string; transaction_date: string; is_saving_goal: boolean; goal_name: string | null } | null {
@@ -837,7 +895,7 @@ bot.on('text', async (ctx) => {
     const cekTabunganKeywords = ['cek tabungan', 'progres impian', 'progres tabungan', 'target tabungan', 'lihat tabungan', 'list tabungan', 'celengan'];
     if (cekTabunganKeywords.some(k => pesan.includes(k))) {
         await ctx.reply("🔍 Menarik data target celengan keluarga dari database...");
-        
+
         try {
             // Tarik data target tabungan yang masih aktif dari Supabase
             const { data: goals, error } = await supabase
@@ -853,15 +911,15 @@ bot.on('text', async (ctx) => {
             }
 
             let reportText = `━━━━━━━━━━━━━━━━━━━━━━━━\n🎯 *PROGRESS TARGET CELENGAN KELUARGA* \n━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-            
+
             goals.forEach((g, idx) => {
                 const current = Number(g.current_amount || 0);
                 const target = Number(g.target_amount || 0);
                 const progressPct = Math.min(Math.round((current / target) * 100), 100);
-                
+
                 // Format sisa tenggat jika ada kolom deadline (gunakan g.deadline sesuai schema DB lu)
-                const deadlineText = g.deadline 
-                    ? `📅 Tenggat: ${new Date(g.deadline).toLocaleDateString('id-ID', { month: 'short', year: 'numeric' })}` 
+                const deadlineText = g.deadline
+                    ? `📅 Tenggat: ${new Date(g.deadline).toLocaleDateString('id-ID', { month: 'short', year: 'numeric' })}`
                     : '📅 Tanpa Tenggat';
 
                 reportText += `${idx + 1}. *${g.name}*\n`;
@@ -895,6 +953,13 @@ bot.on('text', async (ctx) => {
     // TRANSAKSI & SAVING GOALS DETECTION
     const punyaNominal = /\d+[.,]?\d*\s*(rb|ribu|k|jt|juta|m|milyar|miliar)?/i.test(pesan);
     const transaksiKeywords = /beli|bayar|jajan|makan|minum|belanja|transfer|masuk|gaji|bonus|topup|isi|pulsa|servis|bensin|parkir|nabung|tabungan|tabung/i.test(pesan);
+
+    // TRANSFER ANTAR ASSET DETECTION
+    const transferKeywords = ['transfer ke', 'transfer dari', 'pindahin ke', 'pindah ke', 'kirim ke', 'tf ke'];
+    if (transferKeywords.some(k => pesan.includes(k)) && punyaNominal) {
+        return await handleTransferAsset(ctx, pesanAsli);
+    }
+
     const isKemungkinanTransaksi = punyaNominal || transaksiKeywords;
 
     if (isKemungkinanTransaksi) {
@@ -979,7 +1044,7 @@ bot.on('callback_query', async (ctx) => {
     const callbackData = ctx.callbackQuery.data;
     if (!callbackData) return;
 
- if (callbackData.startsWith('p:')) {
+    if (callbackData.startsWith('p:')) {
         await ctx.answerCbQuery("⏳ Memproses...");
         const parts = callbackData.split(':');
         const txId = parts[1];
@@ -998,7 +1063,7 @@ bot.on('callback_query', async (ctx) => {
                 .select('id, ownership, current_balance, asset_id') // <-- SUNTIK asset_id & current_balance
                 .eq('name', selectedPocket)
                 .single();
-                
+
             const finalPocketId = pocketData?.id || 1;
             const linkedAssetId = pocketData?.asset_id; // <-- AMBIL RELASI INDUKNYA
             const transactionType = type || 'expense';
@@ -1072,8 +1137,51 @@ bot.on('callback_query', async (ctx) => {
             await ctx.editMessageText("❌ Gagal menyimpan, coba lagi.").catch(() => { });
         }
     }
+    // TRANSFER ASSET CALLBACK
+    else if (callbackData.startsWith('tfa:')) {
+        await ctx.answerCbQuery("⏳ Memproses transfer...");
+        const parts = callbackData.split(':');
+        const txId = parts[1];
+        const targetAssetId = Number(parts[2]);
+        const sourceAssetId = Number(parts[3]);
+
+        const txData = pendingTransactions.get(txId);
+        if (!txData) { await ctx.answerCbQuery("❌ Data expired."); return; }
+
+        const { amount, actor } = txData;
+        pendingTransactions.delete(txId);
+
+        try {
+            const { data: source } = await supabase.from('assets').select('*').eq('id', sourceAssetId).single();
+            const { data: target } = await supabase.from('assets').select('*').eq('id', targetAssetId).single();
+            if (!source || !target) throw new Error('Asset tidak ditemukan');
+
+            // Update saldo
+            await supabase.from('assets').update({ balance: Number(source.balance) - amount }).eq('id', sourceAssetId);
+            await supabase.from('assets').update({ balance: Number(target.balance) + amount }).eq('id', targetAssetId);
+
+            // Catat transaksi
+            await supabase.from('transactions').insert([{
+                amount, description: `Transfer antar asset: ${source.name} → ${target.name}`,
+                type: 'transfer', asset_id: sourceAssetId, actor,
+                category: 'transfer_antar_asset', merchant: target.name
+            }]);
+
+            const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
+            await ctx.editMessageText(
+                `✅ *TRANSFER BERHASIL!*\n\n` +
+                `📤 Dari: *${source.name}*\n📥 Ke: *${target.name}*\n💰 Nominal: *${formatIDR(amount)}*\n👤 Oleh: ${actorEmoji}\n\n` +
+                `💵 Saldo ${source.name}: *${formatIDR(Number(source.balance) - amount)}*\n` +
+                `💵 Saldo ${target.name}: *${formatIDR(Number(target.balance) + amount)}*`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error("❌ Transfer error:", error);
+            await ctx.editMessageText("❌ Gagal transfer asset.").catch(() => { });
+        }
+    }
     // INTERSEPTOR CALLBACK QUERY BARU KHUSUS PROSES SAVING GOALS (FITUR 4)
-else if (callbackData.startsWith('sg:')) {
+    else if (callbackData.startsWith('sg:')) {
         await ctx.answerCbQuery("⏳ Memproses Tabungan...");
         const parts = callbackData.split(':');
         const txId = parts[1];
@@ -1111,7 +1219,7 @@ else if (callbackData.startsWith('sg:')) {
                 .select('id, current_balance, asset_id') // <-- AMBIL KOLOM asset_id NYA JUGA
                 .eq('name', selectedPocket)
                 .single();
-                
+
             if (!pocketData) throw new Error('Kantong asal tidak valid.');
 
             const finalPocketId = pocketData.id;
@@ -1215,7 +1323,7 @@ else if (callbackData.startsWith('sg:')) {
 
             const { data: cp } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
             if (cp) await supabase.from('pockets').update({ current_balance: Number(cp.current_balance) - amount }).eq('id', finalPocketId);
-            
+
             // 🆕 KURANGI ASSETS SOURCE JUGA (FIX KRITIS!)
             if (linkedAssetId) {
                 const { data: assetData } = await supabase.from('assets').select('balance').eq('id', linkedAssetId).single();
@@ -1272,7 +1380,7 @@ else if (callbackData.startsWith('sg:')) {
 
             const { data: cp } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
             if (cp) await supabase.from('pockets').update({ current_balance: Number(cp.current_balance) - amount }).eq('id', finalPocketId);
-            
+
             // 🆕 KURANGI ASSETS SOURCE JUGA (FIX KRITIS!)
             if (linkedAssetId) {
                 const { data: assetData } = await supabase.from('assets').select('balance').eq('id', linkedAssetId).single();
@@ -1396,42 +1504,57 @@ bot.command('help', async (ctx) => {
 // ==========================================
 // START BOT & CRON
 // ==========================================
-console.log('🤖 Menghubungkan ke Bot Telegram...');
-bot.launch()
+const KOYEB_URL = process.env.KOYEB_URL || 'https://monify-backend-xxx.koyeb.app';
+
+console.log('🤖 Menghubungkan ke Bot Telegram via Webhook...');
+
+// Set webhook
+bot.telegram.setWebhook(`${KOYEB_URL}/api/telegram-webhook`)
     .then(() => {
-        console.log('✅ Bot Telegram aktif!');
+        console.log('✅ Webhook terpasang!');
         setBotInstance(bot);
         startCronJobs();
     })
-    .catch((err) => console.error('❌ Gagal:', err));
+    .catch((err) => console.error('❌ Gagal set webhook:', err));
+
+// Webhook endpoint
+app.post('/api/telegram-webhook', (req, res) => {
+    bot.handleUpdate(req.body);
+    res.sendStatus(200);
+});
 
 app.get('/', (req, res) => res.send('Backend Running! 🚀'));
+
+app.get('/api/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // Endpoint khusus untuk memicu notifikasi dari Cron-Job.org (Bypass Sleep Free Tier)
 app.get('/api/trigger-bill-check', async (req, res) => {
-  try {
-    console.log("⏰ Pemicu eksternal terdeteksi: Memulai pengecekan tagihan dan cicilan harian...");
-    
-    // Eksekusi fungsi pengecekan tagihan
-    if (typeof checkDueBills === 'function') {
-      await checkDueBills();
+    try {
+        console.log("⏰ Pemicu eksternal terdeteksi: Memulai pengecekan tagihan dan cicilan harian...");
+
+        // Eksekusi fungsi pengecekan tagihan
+        if (typeof checkDueBills === 'function') {
+            await checkDueBills();
+        }
+
+        // Eksekusi fungsi pengecekan cicilan
+        if (typeof checkDueInstallments === 'function') {
+            await checkDueInstallments();
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Notifikasi tagihan & cicilan berhasil diproses dan dikirim ke Telegram!"
+        });
+    } catch (error) {
+        console.error("❌ Eror saat memicu notifikasi keuangan:", error);
+        return res.status(500).json({
+            success: false,
+            error: "Internal Server Error saat memproses notifikasi"
+        });
     }
-    
-    // Eksekusi fungsi pengecekan cicilan
-    if (typeof checkDueInstallments === 'function') {
-      await checkDueInstallments();
-    }
-    
-    return res.status(200).json({ 
-      success: true, 
-      message: "Notifikasi tagihan & cicilan berhasil diproses dan dikirim ke Telegram!" 
-    });
-  } catch (error) {
-    console.error("❌ Eror saat memicu notifikasi keuangan:", error);
-    return res.status(500).json({ 
-      success: false, 
-      error: "Internal Server Error saat memproses notifikasi" 
-    });
-  }
 });
 app.listen(PORT, () => console.log(`Server di http://localhost:${PORT}`));
 
