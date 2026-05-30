@@ -21,7 +21,7 @@ const groqClient = GROQ_API_KEY ? new OpenAI({
 }) : null;
 
 // ==========================================
-// INTERFACE
+// INTERFACE (SUNTIKAN PROPERTI GRANULAR & GOALS!)
 // ==========================================
 export interface ParsedTransaction {
     amount: number;
@@ -29,6 +29,11 @@ export interface ParsedTransaction {
     type: 'income' | 'expense' | 'transfer';
     allocated_pocket: string;
     actor: 'suami' | 'istri' | 'auto';
+    category: string;             // FITUR 1: Kategori pengeluaran (makanan_minuman, elektronik, dll)
+    merchant: string;             // FITUR 1: Toko tempat beli (sugu, alfamart, dll)
+    transaction_date: string;     // FITUR 1: ISO String tanggal pembelian hasil deteksi manual (backdate)
+    is_saving_goal: boolean;      // FITUR 4: Menandakan intent menabung
+    goal_name: string | null;     // FITUR 4: Nama barang/target yang mau ditabung (kulkas, ac, dll)
 }
 
 // ==========================================
@@ -51,34 +56,45 @@ async function parseWithGroq(text: string): Promise<ParsedTransaction | null> {
                 {
                     role: 'system',
                     content: `Kamu adalah Moni, asisten keuangan keluarga Qisthi (suami) dan Gita (istri).
+Hari ini adalah hari Jumat, tanggal 29 Mei 2026.
 
 Output HARUS JSON valid dengan format:
 {
   "amount": integer (nominal dalam rupiah),
   "description": string (deskripsi singkat transaksi),
   "type": "income" | "expense" | "transfer",
-  "allocated_pocket": string (snake_case: jajan_qisthi, jajan_gita, operasional_utama, transportasi_dan_kendaraan, keperluan_bayi, kebutuhan_rutin_bulanan, tabungan_masa_depan, operasional_harian, atau "ASK_USER" jika ambigu),
-  "actor": "suami" | "istri" | "auto"
+  "allocated_pocket": string (snake_case: jajan_qisthi, jajan_gita, operasional_utama, transportasi_dan_kendaraan, keperluan_bayi, kebutuhan_rutin_bulanan, tabungan_masa_depan, operasional_harian, atau "ASK_USER"),
+  "actor": "suami" | "istri" | "auto",
+  "category": string (pilih salah satu enum: makanan_minuman, elektronik, transportasi, keperluan_bayi, tagihan_rutin, jajan_hiburan, investasi_tabungan, sandang, lainnya),
+  "merchant": string (nama toko/tempat setelah kata 'di', atau nama instansi jika tagihan, default "umum"),
+  "transaction_date": string (ISO 8601 string tanggal transaksi. Jika ada kata 'kemarin' kurangi tanggal hari ini, jika '2 hari lalu' kurangi 2 hari, jika tanggal spesifik seperti '25 mei' ubah ke format tanggal yang benar di tahun 2026. Default gunakan waktu sekarang),
+  "is_saving_goal": boolean (true jika user bermaksud menabung untuk target masa depan seperti kulkas, ac, motor, dll. Default false),
+  "goal_name": string atau null (jika is_saving_goal true, ekstraksi nama barangnya seperti "Beli Kulkas", "Beli AC", kapital di awal. Jika false masukkan null)
 }
 
 Aturan:
 - amount: angka integer saja, tanpa titik/koma/Rp. Contoh: 50000
-- description: singkat, huruf kapital di awal. Contoh: "Beli Bakso Cuanki"
-- type: "income" untuk uang masuk (gaji, bonus), "expense" untuk uang keluar (beli, bayar), "transfer" untuk pindah saldo
-- allocated_pocket: deteksi dari teks, ubah ke lowercase snake_case. Contoh: "Jajan Qisthi" -> "jajan_qisthi". "ASK_USER" jika tidak jelas.
+- description: singkat, huruf kapital di awal. Contoh: "Beli Martabak"
+- type: "income" untuk uang masuk, "expense" untuk uang keluar, "transfer" untuk pindah saldo / nabung
+- allocated_pocket: deteksi dari teks, ubah ke lowercase snake_case. "ASK_USER" jika tidak jelas.
 - actor: "istri" jika ada kata Gita/istri/bunda/mama, "suami" jika ada kata saya/aku/Qisthi/ayah, "auto" jika tidak jelas
-- Prediksi kantong jika tidak disebutkan:
-  * bensin, servis, parkir -> "transportasi_dan_kendaraan"
-  * wifi, listrik, tagihan -> "kebutuhan_rutin_bulanan"
-  * bayi, popok, susu -> "keperluan_bayi"
-  * jajan, makan, kopi -> "operasional_harian"
-
+- Prediksi kantong & kategori jika tidak disebutkan:
+  * bensin, servis, parkir -> pocket: "transportasi_dan_kendaraan", category: "transportasi"
+  * wifi, listrik, air, tagihan -> pocket: "kebutuhan_rutin_bulanan", category: "tagihan_rutin"
+  * bayi, popok, susu -> pocket: "keperluan_bayi", category: "keperluan_bayi"
+  * martabak, makan, kopi, jajan -> pocket: "operasional_harian", category: "makanan_minuman"
+  * laptop, hp, kulkas, ac -> category: "elektronik"
+- Jika teks berupa "nabung beli kulkas 700rb" atau "Nabung Air Purifier 500rb", maka:
+  * is_saving_goal: true
+  * goal_name: string (Ambil MURNI nama barangnya saja TANPA kata kerja seperti 'Beli' atau 'Buat' di depannya. Contoh jika "Nabung Air Purifier" -> cukup isi "Air Purifier", jika "nabung beli kulkas" -> cukup isi "Kulkas", gunakan Title Case yang bersih)
+  * type: "transfer"
+  * category: "investasi_tabungan"
 JANGAN tambahkan teks apapun selain JSON.`
                 },
                 { role: 'user', content: text }
             ],
             response_format: { type: 'json_object' },
-            max_tokens: 200,
+            max_tokens: 300,
         });
 
         const content = response.choices[0]?.message?.content;
@@ -92,6 +108,11 @@ JANGAN tambahkan teks apapun selain JSON.`
             type: ['income', 'expense', 'transfer'].includes(parsed.type) ? parsed.type : 'expense',
             allocated_pocket: parsed.allocated_pocket || 'ASK_USER',
             actor: ['suami', 'istri', 'auto'].includes(parsed.actor) ? parsed.actor : 'auto',
+            category: parsed.category || 'lainnya',
+            merchant: parsed.merchant || 'umum',
+            transaction_date: parsed.transaction_date || new Date().toISOString(),
+            is_saving_goal: !!parsed.is_saving_goal,
+            goal_name: parsed.goal_name || null
         };
 
     } catch (error: any) {
@@ -122,21 +143,28 @@ async function parseWithGemini(text: string): Promise<ParsedTransaction | null> 
                         description: { type: "STRING" as any },
                         type: { type: "STRING" as any, enum: ['income', 'expense', 'transfer'] },
                         allocated_pocket: { type: "STRING" as any },
-                        actor: { type: "STRING" as any, enum: ['suami', 'istri', 'auto'] }
+                        actor: { type: "STRING" as any, enum: ['suami', 'istri', 'auto'] },
+                        category: { type: "STRING" as any, enum: ['makanan_minuman', 'elektronik', 'transportasi', 'keperluan_bayi', 'tagihan_rutin', 'jajan_hiburan', 'investasi_tabungan', 'sandang', 'lainnya'] },
+                        merchant: { type: "STRING" as any },
+                        transaction_date: { type: "STRING" as any },
+                        is_saving_goal: { type: "BOOLEAN" as any },
+                        goal_name: { type: "STRING" as any, nullable: true }
                     },
-                    required: ["amount", "description", "type", "allocated_pocket", "actor"]
+                    required: ["amount", "description", "type", "allocated_pocket", "actor", "category", "merchant", "transaction_date", "is_saving_goal", "goal_name"]
                 } as any
             }
         });
 
         const prompt = `
-Parse teks transaksi keuangan ini ke JSON:
+Kamu adalah asisten keuangan keluarga. Hari ini Jumat, 29 Mei 2026.
+Parse teks transaksi keuangan ini ke JSON sesuai skema:
 "${text}"
 
-Aturan:
-- type: "income" (uang masuk), "expense" (uang keluar), "transfer" (pindah saldo)
-- allocated_pocket: snake_case (contoh: jajan_qisthi, operasional_utama) atau "ASK_USER"
-- actor: "suami" (Qisthi/saya), "istri" (Gita), "auto" (tidak jelas)
+Aturan Khusus:
+- merchant: nama toko setelah kata 'di', default 'umum'.
+- transaction_date: jika ada kata 'kemarin', '2 hari lalu', atau tanggal tertentu, konversi ke format ISO 8601 string yang valid di tahun 2026.
+- is_saving_goal: true jika berupa kalimat "nabung beli kulkas" atau "nabung air purifier".
+- goal_name: Ambil MURNI nama barang target tabungan secara murni TANPA ditambahkan kata kerja di depannya (Contoh jika "nabung air purifier" -> cukup isi "Air Purifier", jika "beli kulkas" -> cukup "Kulkas").
 - JANGAN tambahkan teks selain JSON.
         `;
 
@@ -145,7 +173,20 @@ Aturan:
         if (!jsonText) return null;
 
         const clean = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        return JSON.parse(clean) as ParsedTransaction;
+        const parsed = JSON.parse(clean);
+
+        return {
+            amount: parsed.amount || 0,
+            description: parsed.description || 'Transaksi',
+            type: parsed.type || 'expense',
+            allocated_pocket: parsed.allocated_pocket || 'ASK_USER',
+            actor: parsed.actor || 'auto',
+            category: parsed.category || 'lainnya',
+            merchant: parsed.merchant || 'umum',
+            transaction_date: parsed.transaction_date || new Date().toISOString(),
+            is_saving_goal: !!parsed.is_saving_goal,
+            goal_name: parsed.goal_name || null
+        };
 
     } catch (error: any) {
         console.error('❌ Gemini error:', error?.message || error);
@@ -163,31 +204,31 @@ Aturan:
 export async function parseFinancialText(text: string): Promise<ParsedTransaction | null> {
     console.log(`🔍 Parsing: "${text.substring(0, 50)}..."`);
 
-    // 1. Coba Groq dulu (gratis, rate limit generous: 30 req/menit, 14.400 req/hari)
+    // 1. Coba Groq dulu
     if (groqAvailable) {
         console.log('🟢 Mencoba Groq...');
         const result = await parseWithGroq(text);
         if (result && result.amount > 0) {
             console.log('✅ Groq berhasil!');
-            groqAvailable = true; // Reset flag
+            groqAvailable = true;
             return result;
         }
         console.log('⚠️ Groq gagal, switch ke Gemini...');
     }
 
-    // 2. Fallback ke Gemini (20 req/hari free tier)
+    // 2. Fallback ke Gemini
     if (geminiAvailable) {
         console.log('🔵 Mencoba Gemini...');
         const result = await parseWithGemini(text);
         if (result && result.amount > 0) {
             console.log('✅ Gemini berhasil!');
-            geminiAvailable = true; // Reset flag
+            geminiAvailable = true;
             return result;
         }
         console.log('⚠️ Gemini gagal...');
     }
 
-    // 3. Coba balik ke Groq (kalau tadi di-skip karena flag false)
+    // 3. Coba balik ke Groq
     if (!groqAvailable && groqClient) {
         console.log('🟢 Mencoba Groq lagi...');
         const result = await parseWithGroq(text);
@@ -198,13 +239,12 @@ export async function parseFinancialText(text: string): Promise<ParsedTransactio
         }
     }
 
-    // 4. Kalau dua-duanya gagal
     console.log('❌ Semua AI gagal, perlu fallback manual.');
     return null;
 }
 
 // ====================================================
-// PARSER GAMBAR (GEMINI SAJA - Groq gak support vision gratis)
+// PARSER GAMBAR (GEMINI VISION)
 // ====================================================
 export async function parseFinancialImage(imageBuffer: Buffer, mimeType: string): Promise<ParsedTransaction | null> {
     if (!genAI) {
@@ -226,9 +266,14 @@ export async function parseFinancialImage(imageBuffer: Buffer, mimeType: string)
                         description: { type: "STRING" as any },
                         type: { type: "STRING" as any, enum: ['income', 'expense', 'transfer'] },
                         allocated_pocket: { type: "STRING" as any },
-                        actor: { type: "STRING" as any, enum: ['suami', 'istri', 'auto'] }
+                        actor: { type: "STRING" as any, enum: ['suami', 'istri', 'auto'] },
+                        category: { type: "STRING" as any, enum: ['makanan_minuman', 'elektronik', 'transportasi', 'keperluan_bayi', 'tagihan_rutin', 'jajan_hiburan', 'investasi_tabungan', 'sandang', 'lainnya'] },
+                        merchant: { type: "STRING" as any },
+                        transaction_date: { type: "STRING" as any },
+                        is_saving_goal: { type: "BOOLEAN" as any },
+                        goal_name: { type: "STRING" as any, nullable: true }
                     },
-                    required: ["amount", "description", "type", "allocated_pocket", "actor"]
+                    required: ["amount", "description", "type", "allocated_pocket", "actor", "category", "merchant", "transaction_date", "is_saving_goal", "goal_name"]
                 } as any
             }
         });
@@ -241,12 +286,16 @@ export async function parseFinancialImage(imageBuffer: Buffer, mimeType: string)
         };
 
         const prompt = `
-Parse struk/nota ini ke JSON:
-- amount: integer (TOTAL AKHIR)
-- description: "Belanja di [Nama Toko]"
+Parse struk/nota ini ke JSON dengan detail tinggi. Hari ini Jumat, 29 Mei 2026.
+Aturan:
+- amount: integer (TOTAL AKHIR YANG DIBAYAR)
+- description: "Belanja di [Nama Toko/Merchant]"
 - type: "expense"
-- allocated_pocket: prediksi (operasional_harian, transportasi_dan_kendaraan, keperluan_bayi, kebutuhan_rutin_bulanan, atau "ASK_USER")
-- actor: "auto"
+- merchant: Ekstrak nama toko asli dari struk (Contoh: Alfamart Bojongsoang, Indomaret, Superindo)
+- category: Analisis barang dominan yang dibeli (makanan_minuman, keperluan_bayi, elektronik, dll)
+- transaction_date: Ekstrak tanggal cetak struk jika terbaca dalam format ISO string. Jika kabur, gunakan waktu sekarang.
+- is_saving_goal: false
+- goal_name: null
 JANGAN tambahkan teks lain.
         `;
 
@@ -255,10 +304,21 @@ JANGAN tambahkan teks lain.
         if (!jsonText) return null;
 
         const clean = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        const parsed = JSON.parse(clean) as ParsedTransaction;
+        const parsed = JSON.parse(clean);
 
         console.log('✅ Gemini Vision berhasil!');
-        return parsed;
+        return {
+            amount: parsed.amount || 0,
+            description: parsed.description || 'Belanja Struk',
+            type: 'expense',
+            allocated_pocket: parsed.allocated_pocket || 'ASK_USER',
+            actor: parsed.actor || 'auto',
+            category: parsed.category || 'lainnya',
+            merchant: parsed.merchant || 'umum',
+            transaction_date: parsed.transaction_date || new Date().toISOString(),
+            is_saving_goal: false,
+            goal_name: null
+        };
 
     } catch (error: any) {
         console.error('❌ Gemini Vision error:', error?.message || error);
@@ -267,7 +327,7 @@ JANGAN tambahkan teks lain.
 }
 
 // ====================================================
-// EXPORT STATUS AI (buat info di feedback)
+// EXPORT STATUS AI
 // ====================================================
 export function getAIStatus(): string {
     if (groqAvailable && groqClient) return 'Groq AI (Llama 3.1)';

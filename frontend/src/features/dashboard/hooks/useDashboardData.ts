@@ -20,7 +20,6 @@ export interface DashboardSummary {
   sharedNetWorth: number;
   suamiNetWorth: number;
   istriNetWorth: number;
-  // ─── AGREGASI SALDO KANTONG (POCKETS) BARU ───
   sharedPocketsBalance: number;
   suamiPocketsBalance: number;
   istriPocketsBalance: number;
@@ -45,56 +44,71 @@ export const useDashboardData = () => {
     istriPocketsBalance: 0,
   });
   const [loading, setLoading] = useState(true);
-  const goldPrice = 1450000; // Harga buyback default per gram (Rp)
+  const goldPrice = 1450000; // Harga buyback emas per gram (Rp)
 
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
 
-      // 1. Tarik Data Aset
-      const { data: assets } = await supabase.from('assets').select('*');
-      // 2. Tarik Data Kantong
-      const { data: pockets } = await supabase.from('pockets').select('*');
-      // 3. Tarik Data Tagihan dengan join pockets
-      const { data: bills } = await supabase
-        .from('bills')
-        .select('id, name, amount, due_date, status, pocket_id, pockets(display_name)');
+      // 1. Tarik Data Aset (Harta Diam/Tabungan Induk)
+      const { data: assets, error: assetErr } = await supabase.from('assets').select('*');
+      if (assetErr) throw assetErr;
+
+      // 2. Tarik Data Kantong (Uang Berjalan/Siap Pakai)
+      const { data: pockets, error: pocketErr } = await supabase.from('pockets').select('*');
+      if (pocketErr) throw pocketErr;
+
+      // 3. Tarik Data Tagihan
+      const { data: bills, error: billErr } = await supabase.from('bills').select('*');
+      if (billErr) throw billErr;
+
+      // 4. Tarik list pockets terpisah untuk mapping nama relasi secara lokal agar aman dari crash join
+      const pocketMapIndexed: Record<number, string> = {};
+      (pockets || []).forEach((p: any) => {
+        pocketMapIndexed[p.id] = p.display_name || p.name || 'Tanpa Kantong';
+      });
       
-      // 4. Tarik 5 Transaksi Terakhir
-      const { data: transactions } = await supabase
+      // 5. Tarik 5 Transaksi Terakhir untuk Mutasi
+      const { data: transactions, error: txLimitErr } = await supabase
         .from('transactions')
-        .select('id, type, amount, description, created_at, actor, pockets(display_name)')
+        .select('id, type, amount, description, created_at, actor, pocket_id')
         .order('created_at', { ascending: false })
         .limit(5);
+      if (txLimitErr) throw txLimitErr;
 
-      // 5. Tarik seluruh transaksi untuk kalkulasi cashflow
-      const { data: allTransactions } = await supabase
+      // 6. Tarik seluruh transaksi bulan ini untuk kalkulasi total cashflow harian
+      const { data: allTransactions, error: txAllErr } = await supabase
         .from('transactions')
         .select('type, amount');
+      if (txAllErr) throw txAllErr;
 
-      // Perhitungan Agregasi Aset (Harta Diam/Tabungan Induk)
+      // ==========================================
+      // AREA KALKULASI AGREGASI ASET (NET WORTH)
+      // ==========================================
       let totalRupiahAset = 0;
       let sharedAssetSum = 0;
       let suamiAssetSum = 0;
       let istriAssetSum = 0;
-      let assetChartData: { name: string; value: number }[] = [];
+      const assetChartData: { name: string; value: number }[] = [];
 
       (assets || []).forEach((asset: any) => {
-        const value = asset.category.toLowerCase() === 'emas' 
+        const value = asset.category?.toLowerCase() === 'emas' 
           ? Number(asset.gold_weight_gram || 0) * goldPrice 
           : Number(asset.balance || 0);
         
         totalRupiahAset += value;
 
         const owner = (asset.ownership || 'bersama').toLowerCase();
-        if (owner === 'suami') suamiAssetSum += value;
-        else if (owner === 'istri') istriAssetSum += value;
+        if (owner === 'suami' || owner === 'qisthi') suamiAssetSum += value;
+        else if (owner === 'istri' || owner === 'gita') istriAssetSum += value;
         else sharedAssetSum += value;
 
         assetChartData.push({ name: asset.name, value });
       });
 
-      // Perhitungan Agregasi Kantong Dana (Uang Berjalan/Siap Pakai)
+      // ==========================================
+      // AREA KALKULASI AGREGASI KANTONG DANA (POCKETS)
+      // ==========================================
       let totalPockets = 0;
       let sharedPocketSum = 0;
       let suamiPocketSum = 0;
@@ -105,27 +119,30 @@ export const useDashboardData = () => {
         totalPockets += balance;
 
         const owner = (p.ownership || 'bersama').toLowerCase();
-        if (owner === 'suami') suamiPocketSum += balance;
-        else if (owner === 'istri') istriPocketSum += balance;
+        if (owner === 'suami' || owner === 'qisthi') suamiPocketSum += balance;
+        else if (owner === 'istri' || owner === 'gita') istriPocketSum += balance;
         else sharedPocketSum += balance;
       });
       
-      // Hitung tagihan
+      // ==========================================
+      // AREA KALKULASI TAGIHAN (BILLS)
+      // ==========================================
       const unpaid = (bills || []).filter((b) => b.status !== 'paid');
       const unpaidCount = unpaid.length;
       const unpaidAmount = unpaid.reduce((sum, b) => sum + Number(b.amount || 0), 0);
 
-      // Hitung tagihan mendatang terdekat
+      // Urutkan 3 tagihan terdekat berdasarkan tanggal jatuh tempo terawal
       const mappedUpcoming = unpaid.map((b: any) => ({
         id: Number(b.id),
         name: b.name,
         amount: Number(b.amount || 0),
         due_date: Number(b.due_date || 1),
-        pocket_name: b.pockets?.display_name || 'Tanpa Kantong'
-      })).sort((x, y) => x.due_date - y.due_date)
-      .slice(0, 3);
+        pocket_name: pocketMapIndexed[b.pocket_id] || 'Tanpa Kantong'
+      })).sort((x, y) => x.due_date - y.due_date).slice(0, 3);
 
-      // Hitung Cash Flow
+      // ==========================================
+      // AREA KALKULASI ARUS KAS (CASH FLOW)
+      // ==========================================
       let incomeSum = 0;
       let expenseSum = 0;
       (allTransactions || []).forEach((tx: any) => {
@@ -155,7 +172,7 @@ export const useDashboardData = () => {
           description: row.description,
           created_at: row.created_at,
           actor: row.actor || 'suami',
-          pocket_name: row.pockets?.display_name || 'Tanpa Kantong'
+          pocket_name: pocketMapIndexed[row.pocket_id] || 'Tanpa Kantong'
         })),
       });
     } catch (err) {

@@ -16,6 +16,7 @@ import {
   ChevronRight,
   LogOut,
   User,
+  Target, // IMPORT IKON TARGET BARU UNTUK SAVING GOALS
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -41,6 +42,7 @@ const MENU_ITEMS: MenuItem[] = [
   { to: '/pockets', icon: <Layers size={20} strokeWidth={2} />, label: 'Kantong Dana' },
   { to: '/transactions', icon: <Receipt size={20} strokeWidth={2} />, label: 'Riwayat Transaksi' },
   { to: '/bills', icon: <CalendarClock size={20} strokeWidth={2} />, label: 'Tagihan & Pengingat' },
+  { to: '/saving-goals', icon: <Target size={20} strokeWidth={2} />, label: 'Target Celengan' }, // <--- TAMBAH MENU BARU DI SIDEBAR LU
 ];
 
 // ===== Custom Hooks =====

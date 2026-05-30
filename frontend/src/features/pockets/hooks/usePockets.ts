@@ -98,29 +98,8 @@ export const usePockets = () => {
     try {
       const snakeName = displayName.trim().toLowerCase().replace(/\s+/g, '_');
 
-      // Cek saldo asset
-      const { data: asset } = await supabase
-        .from('assets')
-        .select('balance') // ✅ balance
-        .eq('id', assetId)
-        .single();
-
-      const saldoAsset = Number(asset?.balance || 0); // ✅ balance
-
-      if (saldoAsset < allocatedBudget) {
-        return { 
-          success: false, 
-          error: `Saldo asset tidak mencukupi! Sisa saldo: ${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(saldoAsset)}` 
-        };
-      }
-
-      // Potong saldo asset
-      await supabase
-        .from('assets')
-        .update({ balance: saldoAsset - allocatedBudget }) // ✅ balance
-        .eq('id', assetId);
-
-      // Insert pocket
+      // Insert pocket sebagai alokasi target budget saja.
+      // Pocket creation tidak langsung mengurangi asset.
       const { error } = await supabase
         .from('pockets')
         .insert([{
@@ -168,23 +147,6 @@ export const usePockets = () => {
 
   const deletePocket = async (id: string) => {
     try {
-      // Kembalikan saldo ke asset
-      const pocket = pockets.find(p => p.id === id);
-      if (pocket && pocket.asset_id && pocket.current_balance > 0) {
-        const { data: asset } = await supabase
-          .from('assets')
-          .select('balance') // ✅ balance
-          .eq('id', pocket.asset_id)
-          .single();
-
-        if (asset) {
-          await supabase
-            .from('assets')
-            .update({ balance: Number(asset.balance) + pocket.current_balance }) // ✅ balance
-            .eq('id', pocket.asset_id);
-        }
-      }
-
       const { error } = await supabase.from('pockets').delete().eq('id', id);
       if (error) throw error;
       setPockets((prev) => prev.filter(p => p.id !== id));

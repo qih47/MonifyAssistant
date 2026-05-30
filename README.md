@@ -87,6 +87,7 @@ Monify adalah **Intelligent Financial Management System** yang menggabungkan kec
 
 - **Add Pocket**: Form untuk membuat kantong baru dengan input:
   - Nama kantong, Monthly budget limit, Ownership, Color/icon
+  - **Catatan:** Pembuatan pocket hanya membuat alokasi target budget. Asset tidak langsung berkurang sampai ada transaksi aktual.
 
 - **Edit Pocket**: Update budget limit, ganti ownership, atau archive kantong
 
@@ -321,7 +322,190 @@ graph LR
 
 ---
 
-## 📂 Struktur Folder Proyek (Folder Structure)
+## � Asset-Pocket Deduction Logic (Penjelasan Alur Debit Dana)
+
+### 📌 Konsep Dasar
+
+Monify menggunakan **double-entry bookkeeping principle** di mana setiap transaksi mengurangi DULU dari **pockets (kantong dana)**, kemudian juga mengurangi dari **assets (aset sumber/induk)**. Ini memastikan:
+
+- **Net Worth Dashboard** selalu sinkron dengan reality
+- **Transparansi penuh** antara jumlah uang di kantong vs aset induknya
+- **Audit trail lengkap** untuk setiap rupiah yang masuk/keluar
+
+> **Catatan penting:** Pembuatan pocket hanya membuat alokasi target budget dan tidak langsung mengurangi saldo asset. Asset baru berkurang ketika transaksi nyata terjadi (misal belanja, bayar tagihan, bayar cicilan, atau nabung dari pocket).
+
+### 🔄 Alur Debit untuk Setiap Jenis Transaksi
+
+#### 1. **Transaksi Biasa (Expense/Income/Transfer)** ✅
+
+Ketika user kirim pesan seperti _"Beli kopi 45rb"_ via Telegram:
+
+```
+Flow:
+1. AI parse → deteksi nominal 45.000, jenis expense, kantong "operasional_utama"
+2. User pilih kantong via inline button
+3. Backend UPDATE pockets.current_balance -= 45.000
+4. Backend UPDATE assets.balance -= 45.000  (aset sumber kantong berkurang)
+5. INSERT transactions journal (with asset_id dari pocket relasi)
+6. Send success confirmation ke Telegram
+```
+
+**Code Pattern** (di `p:` callback):
+
+```typescript
+// Ambil kantong dengan asset_id relasinya
+const { data: pocketData } = await supabase
+  .from("pockets")
+  .select("id, current_balance, asset_id")
+  .eq("name", selectedPocket)
+  .single();
+
+// Update pockets balance
+await supabase
+  .from("pockets")
+  .update({ current_balance: Number(pocketData.current_balance) - amount })
+  .eq("id", finalPocketId);
+
+// Update assets balance (KUNCI PENTING!)
+if (linkedAssetId) {
+  const { data: assetData } = await supabase
+    .from("assets")
+    .select("balance")
+    .eq("id", linkedAssetId)
+    .single();
+
+  if (assetData) {
+    await supabase
+      .from("assets")
+      .update({ balance: Number(assetData.balance) - amount })
+      .eq("id", linkedAssetId);
+  }
+}
+```
+
+#### 2. **Bayar Tagihan (Bill Payment)** ✅ **[FIXED]**
+
+Ketika user bayar tagihan seperti WiFi, Listrik, dll:
+
+```
+Flow:
+1. User kirim "/bayar wifi" atau "bayarin listrik"
+2. Bot tampilkan daftar tagihan yang cocok
+3. User pilih nominal & kantong sumber pembayaran
+4. Backend UPDATE bills.status = "paid"
+5. Backend UPDATE pockets.current_balance -= amount
+6. Backend UPDATE assets.balance -= amount  (BARU - FIX!)
+7. INSERT transactions journal dengan asset_id yang benar (BUKAN hardcoded 1!)
+8. Send success confirmation
+```
+
+**Masalah Sebelumnya**:
+
+- ❌ Hardcoded `asset_id: 1` di transactions journal
+- ❌ Assets balance TIDAK dikurangi saat bayar tagihan
+- ❌ Net Worth dashboard tidak sinkron dengan reality
+
+**Solusi Implemented**:
+
+- ✅ Fetch pocket dengan kolom `asset_id`
+- ✅ Gunakan `linkedAssetId` saat insert transactions
+- ✅ Kurangi assets.balance dengan jumlah pembayaran
+- ✅ Saldo real-time di web dashboard sekarang akurat
+
+#### 3. **Bayar Cicilan (Installment Payment)** ✅ **[FIXED]**
+
+Ketika user bayar cicilan motor, mobil, dll:
+
+```
+Flow:
+1. User kirim "/cicil motor" atau "bayarin mobil"
+2. Bot tampilkan daftar cicilan yang aktif
+3. User pilih cicilan & kantong pembayaran
+4. Backend UPDATE installments.paid_months += 1
+5. Backend UPDATE pockets.current_balance -= amount
+6. Backend UPDATE assets.balance -= amount  (BARU - FIX!)
+7. INSERT transactions journal dengan asset_id yang benar (BUKAN hardcoded 1!)
+8. Send progress confirmation (Bulan ke-X/Total)
+```
+
+**Masalah Sebelumnya** (Sama seperti bills):
+
+- ❌ Hardcoded `asset_id: 1`
+- ❌ Assets tidak berkurang
+- ❌ Net Worth mismatch
+
+**Solusi Implemented**:
+
+- ✅ Sama dengan bill payment fix
+- ✅ Pastikan cicilan tercatat dengan asset_id yang benar
+
+#### 4. **Tabungan/Celengan (Saving Goals)** ✅
+
+Ketika user nabung untuk target impian seperti _"Nabung beli kulkas"_:
+
+```
+Flow:
+1. User kirim "Nabung Air Purifier 500rb"
+2. AI detect saving intent & goal name
+3. User pilih kantong sumber nabung
+4. Backend INSERT saving_logs (track setoran)
+5. Backend UPDATE saving_goals.current_amount += 500.000
+6. Backend UPDATE pockets.current_balance -= 500.000
+7. Backend UPDATE assets.balance -= 500.000  (Aset berkurang untuk keep net worth sync)
+8. INSERT transactions journal
+9. Send progress confirmation (30% of target, etc)
+```
+
+**Desain**: Setoran tabungan juga mengurangi assets agar Net Worth tetap akurat mencerminkan actual cash position keluarga.
+
+### 🎯 Kesimpulan Flow
+
+```
+Setiap transaksi keuangan yang masuk ke sistem HARUS:
+
+1. ✅ Reduce pockets.current_balance (saldo kantong berkurang/bertambah)
+2. ✅ Reduce assets.balance (aset sumber berkurang/bertambah)
+3. ✅ INSERT transactions journal dengan kolom asset_id yang tepat
+4. ✅ Keep pockets.asset_id relasi tetap valid & not null
+
+JIKA ada transaksi yang TIDAK memenuhi ketiga rule ini:
+→ Net Worth di dashboard akan SALAH / TIDAK SINKRON dengan reality
+→ Keluarga tidak bisa percaya data keuangan yang ditampilkan
+```
+
+### 📊 Contoh Skenario
+
+**Skenario**: Keluarga punya 2 assets:
+
+- Rekening BCA (balance: 50 juta)
+- Rekening Mandiri (balance: 20 juta)
+
+**Dan 3 pockets** yang linked:
+
+- Operasional Utama → linked ke Rekening BCA
+- Jajan Qisthi → linked ke Rekening BCA
+- Jajan Gita → linked ke Rekening Mandiri
+
+**Ketika terjadi:**
+
+1. User bayar tagihan WiFi 350rb dari "Operasional Utama"
+   - ✅ BCA balance jadi 49.65 juta (50M - 350rb)
+   - ✅ Operasional current_balance berkurang 350rb
+
+2. User bayar cicilan motor 1.5jt dari "Jajan Qisthi"
+   - ✅ BCA balance jadi 48.15 juta (49.65M - 1.5M)
+   - ✅ Jajan Qisthi current_balance berkurang 1.5M
+
+3. User nabung 500rb untuk celengan smartphone dari "Jajan Gita"
+   - ✅ Mandiri balance jadi 19.5 juta (20M - 500rb)
+   - ✅ Jajan Gita current_balance berkurang 500rb
+   - ✅ Saving goal smartphone progress: 500rb / 3jt (17%)
+
+**Net Worth di Dashboard**: 48.15M + 19.5M = **67.65M** ✅ (sesuai reality)
+
+---
+
+## �📂 Struktur Folder Proyek (Folder Structure)
 
 ```text
 assistant_keuangan/

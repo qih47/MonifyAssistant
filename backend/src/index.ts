@@ -42,7 +42,7 @@ try {
 const ALLOWED_CHAT_IDS = Object.keys(ALLOWED_USERS);
 
 // ==========================================
-// TEMPORARY STORAGE
+// TEMPORARY STORAGE (SUNTIK DATA GRANULAR & GOALS)
 // ==========================================
 const pendingTransactions = new Map<string, {
     amount: number;
@@ -50,6 +50,11 @@ const pendingTransactions = new Map<string, {
     description: string;
     type: string;
     timestamp: number;
+    category?: string;          // FITUR 1 & 2
+    merchant?: string;          // FITUR 1
+    transaction_date?: string;  // FITUR 1
+    is_saving_goal?: boolean;   // FITUR 3 & 4
+    goal_name?: string | null;  // FITUR 3 & 4
 }>();
 
 setInterval(() => {
@@ -130,14 +135,12 @@ function formatPocketName(name: string): string {
 // HELPER: Get Pocket Icon
 // ==========================================
 function getPocketIcon(ownership: string, pocketName?: string): string {
-    // Icon berdasarkan ownership
     const ownerIconMap: Record<string, string> = {
         'bersama': '💳',
         'suami': '🧑',
         'istri': '👩',
     };
-    
-    // Icon berdasarkan nama pocket (lebih spesifik)
+
     const nameIconMap: Record<string, string> = {
         'operasional_utama': '🏦',
         'operasional_harian': '🛒',
@@ -147,13 +150,12 @@ function getPocketIcon(ownership: string, pocketName?: string): string {
         'keperluan_bayi': '👶',
         'kebutuhan_rutin_bulanan': '📋',
         'tabungan_masa_depan': '💰',
-   
     };
-    
+
     if (pocketName && nameIconMap[pocketName]) {
         return nameIconMap[pocketName];
     }
-    
+
     return ownerIconMap[ownership] || '💵';
 }
 
@@ -174,7 +176,7 @@ async function generateNaturalResponse(context: string, userName: string): Promi
             messages: [
                 {
                     role: 'system',
-                    content: `Kamu adalah Moni, asisten keuangan keluarga yang profesional, informatif, dan friendly. Panggil user "${userName}" atau "Kak". Bahasa Indonesia yang baik, jelas, dan to the point. JANGAN gunakan kata "gue", "lo", "cuy". Singkat 1-2 kalimat.`
+                    content: `Kamu adalah Moni, asisten keuangan keluarga yang profesional, informatif, and friendly. Panggil user "${userName}" atau "Kak". Bahasa Indonesia yang baik, jelas, dan to the point. JANGAN gunakan kata "gue", "lo", "cuy". Singkat 1-2 kalimat.`
                 },
                 { role: 'user', content: context }
             ],
@@ -250,7 +252,7 @@ async function handleListCicilan(ctx: any) {
                 const totalDibayar = Number(i.down_payment || 0) + (Number(i.paid_months) * Number(i.monthly_amount));
                 const sisaTotal = Number(i.total_amount) - totalDibayar;
                 const progressPct = Math.round((Number(i.paid_months) / Number(i.tenor_months)) * 100);
-                
+
                 listText += `${idx + 1}. *${i.name}*\n`;
                 listText += `   💰 ${formatIDR(Number(i.monthly_amount))}/bulan\n`;
                 listText += `   📊 Progress: ${i.paid_months}/${i.tenor_months} bulan (${progressPct}%)\n`;
@@ -269,6 +271,41 @@ async function handleListCicilan(ctx: any) {
     } catch (err) {
         console.error("❌ Gagal list cicilan:", err);
         await ctx.reply("⚠️ Gagal mengambil data cicilan, Kak.");
+    }
+}
+
+// ==========================================
+// HELPER: Check & Notify Low Fund (NEW FEATURE!)
+// ==========================================
+async function checkAndNotifyLowFund(ctx: any, pocketName: string, newBalance: number, actor: string): Promise<void> {
+    try {
+        // 🚨 THRESHOLD CONFIGURATION
+        const LOW_FUND_THRESHOLD = 2000000; // 2 juta = warning threshold
+        const CRITICAL_THRESHOLD = 1000000; // 1 juta = critical alert
+        
+        if (newBalance < CRITICAL_THRESHOLD) {
+            // CRITICAL ALERT 🔴
+            const icon = "🔴 KRITIS!";
+            const warningMsg = `${icon} Kantong *${formatPocketName(pocketName)}* SUDAH TINGGAL *${formatIDR(newBalance)}*!\n\n⚠️ BAHAYA OVERDRAFT! Jangan ada pengeluaran lagi sampai ada dana masuk!`;
+            await ctx.replyWithMarkdown(warningMsg);
+            
+            // Also send email alert to family
+            await sendTransactionEmailNotification({
+                actor,
+                amount: newBalance,
+                description: `⚠️ ALERT: Kantong ${formatPocketName(pocketName)} KRITIS (${formatIDR(newBalance)})`,
+                type: 'alert',
+                pocketName
+            }).catch(() => {});
+        } else if (newBalance < LOW_FUND_THRESHOLD) {
+            // WARNING ALERT 🟡
+            const icon = "🟡 PERHATIAN";
+            const warningMsg = `${icon} Kantong *${formatPocketName(pocketName)}* sudah kurang dari *2jt* → Sekarang *${formatIDR(newBalance)}*\n\n💡 Saran: Cek apakah perlu top-up dana dari assets lain.`;
+            await ctx.replyWithMarkdown(warningMsg);
+        }
+        // Jika balance normal (>2jt), tidak perlu warning
+    } catch (err) {
+        console.error("❌ Error check low fund:", err);
     }
 }
 
@@ -309,8 +346,8 @@ async function handleCekSaldo(ctx: any) {
 
         const totalSemua = saldoBersama + saldoQisthi + saldoGita;
 
-        const reportText = 
-`━━━━━━━━━━━━━━━━━━━\n💰 *LAPORAN SALDO REAL-TIME*\n━━━━━━━━━━━━━━━━━━━\n
+        const reportText =
+            `━━━━━━━━━━━━━━━━━━━\n💰 *LAPORAN SALDO REAL-TIME*\n━━━━━━━━━━━━━━━━━━━\n
 🌐 *Kantong Bersama:* *${formatIDR(saldoBersama)}*
 ${detailBersama}
 🧑 *Kantong Qisthi:* *${formatIDR(saldoQisthi)}*
@@ -402,8 +439,8 @@ async function handleRingkasan(ctx: any) {
         const totalKewajiban = totalTagihan + totalCicilanBulanan;
         const sisaSetelahBayar = totalSaldo - totalKewajiban;
 
-        const ringkasan = 
-`━━━━━━━━━━━━━━━━━━━\n📊 *RINGKASAN KEUANGAN*\n${bulanTeks}\n━━━━━━━━━━━━━━━━━━━\n
+        const ringkasan =
+            `━━━━━━━━━━━━━━━━━━━\n📊 *RINGKASAN KEUANGAN*\n${bulanTeks}\n━━━━━━━━━━━━━━━━━━━\n
 💰 *ARUS KAS:*
 🟢 Pemasukan: *${formatIDR(totalPemasukan)}*
 🔴 Pengeluaran: *${formatIDR(totalPengeluaran)}*
@@ -603,7 +640,7 @@ async function handleLaporan(ctx: any) {
 // ==========================================
 // HELPER: Parser Manual
 // ==========================================
-function parseTransactionManual(text: string): { amount: number; description: string; type: string; allocated_pocket: string; actor: string } | null {
+function parseTransactionManual(text: string): { amount: number; description: string; type: string; allocated_pocket: string; actor: string; category: string; merchant: string; transaction_date: string; is_saving_goal: boolean; goal_name: string | null } | null {
     const pesan = text.toLowerCase().trim();
     const nominalMatch = pesan.match(/(\d+[.,]?\d*)\s*(rb|ribu|k|jt|juta|m|milyar|miliar)?/i);
     if (!nominalMatch) return null;
@@ -617,7 +654,7 @@ function parseTransactionManual(text: string): { amount: number; description: st
 
     let type = 'expense';
     if (/gaji|masuk|income|bonus|dapet|terima|transfer masuk/i.test(pesan)) type = 'income';
-    else if (/transfer|pindah/i.test(pesan)) type = 'transfer';
+    else if (/transfer|pindah|nabung/i.test(pesan)) type = 'transfer';
 
     let actor = 'auto';
     if (/gita|istri|bunda|mama/i.test(pesan)) actor = 'istri';
@@ -636,7 +673,41 @@ function parseTransactionManual(text: string): { amount: number; description: st
     const cleanDesc = text.replace(/rp\.?\s*/gi, '').replace(/\d+[.,]?\d*\s*(rb|ribu|k|jt|juta|m|milyar|miliar)?/gi, '').replace(/pake\s+.*/gi, '').replace(/dari\s+.*/gi, '').replace(/masuk\s+ke\s+.*/gi, '').trim();
     const description = cleanDesc || text.replace(/\d.*/, '').trim() || 'Transaksi';
 
-    return { amount: Math.round(amount), description: description.replace(/^[.,\s]+/, '').trim() || 'Transaksi', type, allocated_pocket, actor };
+    // Fallback Manual granular
+    let category = 'lainnya';
+    if (/makan|martabak|kopi|sugu/i.test(pesan)) category = 'makanan_minuman';
+    else if (/laptop|hp|listrik|wifi/i.test(pesan)) category = 'elektronik';
+
+    let merchant = 'umum';
+    const storeMatch = pesan.match(/di\s+([a-zA-Z0-9_\s]+)/i);
+    if (storeMatch) merchant = storeMatch[1].trim();
+
+    const is_saving_goal = /nabung|tabungan|tabung/i.test(pesan) && !/masa depan/i.test(pesan); // Tambah kata 'tabung'
+    let goal_name = null;
+    if (is_saving_goal) {
+        // Cari polanya, lalu ambil nama barangnya secara murni
+        const goalMatch = text.match(/(?:beli|buat|tabung|nabung)\s+([a-zA-Z0-9_\s]+)/i);
+        if (goalMatch) {
+            // Bersihkan sisa kata kerja yang mungkin ikut terbawa oleh regex
+            goal_name = goalMatch[1]
+                .replace(/\d.*/, '') // Buang angka sisa nominal rupiah
+                .replace(/^(beli|buat|tabung|nabung)\s+/i, '') // Buang kata "beli/buat" di depan jika ada
+                .trim();
+        }
+    }
+
+    return {
+        amount: Math.round(amount),
+        description: description.replace(/^[.,\s]+/, '').trim() || 'Transaksi',
+        type,
+        allocated_pocket,
+        actor,
+        category,
+        merchant,
+        transaction_date: new Date().toISOString(),
+        is_saving_goal,
+        goal_name
+    };
 }
 
 // ==========================================
@@ -645,16 +716,16 @@ function parseTransactionManual(text: string): { amount: number; description: st
 async function getPocketButtons(txId: string): Promise<Array<Array<{ text: string; callback_data: string }>>> {
     try {
         const { data: pockets } = await supabase.from('pockets').select('name, ownership').order('name');
+        const txData = pendingTransactions.get(txId);
+
+        // Pilih callback prefix secara dinamis: 'sg' untuk saving goals, 'p' untuk transaksi normal
+        const prefix = txData?.is_saving_goal ? 'sg' : 'p';
 
         if (!pockets || pockets.length === 0) {
             return [
-                [{ text: '🌐 Operasional Utama', callback_data: `p:${txId}:operasional_utama` }],
-                [{ text: '🧑 Jajan Qisthi', callback_data: `p:${txId}:jajan_qisthi` }],
-                [{ text: '👩 Jajan Gita', callback_data: `p:${txId}:jajan_gita` }],
-                [{ text: '🚗 Transportasi', callback_data: `p:${txId}:transportasi_dan_kendaraan` }],
-                [{ text: '👶 Keperluan Bayi', callback_data: `p:${txId}:keperluan_bayi` }],
-                [{ text: '📋 Kebutuhan Rutin', callback_data: `p:${txId}:kebutuhan_rutin_bulanan` }],
-                [{ text: '🏦 Tabungan', callback_data: `p:${txId}:tabungan_masa_depan` }],
+                [{ text: '🌐 Operasional Utama', callback_data: `${prefix}:${txId}:operasional_utama` }],
+                [{ text: '🧑 Jajan Qisthi', callback_data: `${prefix}:${txId}:jajan_qisthi` }],
+                [{ text: '👩 Jajan Gita', callback_data: `${prefix}:${txId}:jajan_gita` }],
                 [{ text: '❌ Batal', callback_data: `cancel:${txId}` }]
             ];
         }
@@ -665,7 +736,7 @@ async function getPocketButtons(txId: string): Promise<Array<Array<{ text: strin
         pockets.forEach((p, index) => {
             const icon = getPocketIcon(p.ownership);
             const cleanName = formatPocketName(p.name);
-            currentRow.push({ text: `${icon} ${cleanName}`, callback_data: `p:${txId}:${p.name}` });
+            currentRow.push({ text: `${icon} ${cleanName}`, callback_data: `${prefix}:${txId}:${p.name}` });
 
             if (currentRow.length === 2 || index === pockets.length - 1) {
                 buttons.push([...currentRow]);
@@ -721,21 +792,89 @@ bot.on('text', async (ctx) => {
     const ringkasanKeywords = ['ringkasan', 'rekap', 'rangkuman', 'summary', 'overview', 'ikhtisar', 'bulan ini', 'rangkum'];
     if (ringkasanKeywords.some(k => pesan.includes(k))) return await handleRingkasan(ctx);
 
-    // HELP
-    const helpKeywords = ['help', 'bantuan', 'fitur', 'bisa apa', 'perintah', 'command', 'apa aja'];
+    // HELP & COMMANDS MENU
+    const helpKeywords = ['help', 'bantuan', 'fitur', 'bisa apa', 'perintah', 'command', 'apa aja', 'menu'];
     if (helpKeywords.some(k => pesan.includes(k))) {
-        return await ctx.reply(
-            `━━━━━━━━━━━━━━━━━━━\n🤖 *MONI - ASISTEN KEUANGAN*\n━━━━━━━━━━━━━━━━━━━\n\n` +
-            `💰 *Cek Saldo*\n/saldo atau "saldo"\n\n` +
-            `📊 *Ringkasan Bulanan*\n/ringkasan atau "rekap"\n\n` +
-            `🧾 *Bayar Tagihan*\n/bayar [nama] atau "bayar wifi"\n\n` +
-            `🏠 *Bayar Cicilan*\n/cicil [nama] atau "cicil motor"\n\n` +
-            `📁 *Laporan CSV*\n/laporan atau "export"\n\n` +
-            `📝 *Catat Transaksi*\n"Beli kopi 35rb"\n\n` +
-            `📸 *Struk Belanja*\nKirim foto langsung\n\n` +
-            `━━━━━━━━━━━━━━━━━━━\n🤖 Moni siap bantu 24/7! 🚀`,
-            { parse_mode: 'Markdown' }
-        );
+        const helpMessage =
+            `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `🤖  *MONIFY FINANCE ASSISTANT* \n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `Halo! Aku *Moni*, asisten keuangan pribadimu. Kamu bisa mencatat dan mengelola keuanganmu secara otomatis lewat chat biasa. Berikut fitur utama yang bisa aku lakukan:\n\n` +
+
+            `📝 *1. CATAT TRANSAKSI (AI PARSER)*\n` +
+            `Cukup ketik kalimat natural, Moni akan otomatis mendeteksi nominal, kategori, dan tipenya.\n` +
+            `• 🛍️ *Pengeluaran:* \`Beli kopi starbucks 45rb\`\n` +
+            `• 💵 *Pemasukan:* \`Gaji bulanan masuk 8.5jt\`\n` +
+            `• 📸 *Struk/Nota:* Kirim foto struk belanjaanmu, Moni akan baca otomatis via OCR!\n\n` +
+
+            `🎯 *2. MANAJEMEN TABUNGAN / IMPIAN*\n` +
+            `Kelola alokasi dana khusus untuk barang impianmu.\n` +
+            `• 📥 *Nabung:* \`Nabung Air Purifier 500rb\`\n` +
+            `• 🔍 *Cek Target:* \`cek tabungan\` atau \`progres impian\`\n\n` +
+
+            `💳 *3. TAGIHAN & CICILAN CONVENIENCE*\n` +
+            `Moni bisa bantu kelola pos pengeluaran rutin.\n` +
+            `• 🌐 *Tagihan:* \`/bayar wifi\` atau \`bayar kosan 1.2jt\`\n` +
+            `• 🏍️ *Cicilan:* \`/cicil motor\` atau \`cicil mobil 2.5jt\`\n\n` +
+
+            `📊 *4. MONITORING & LAPORAN*\n` +
+            `Pantau kondisi kesehatan keuanganmu kapan saja.\n` +
+            `• 💰 *Cek Saldo:* \`/saldo\` atau ketik \`cek saldo\`\n` +
+            `• 📉 *Alokasi Budget:* \`cek budget bulan ini\`\n` +
+            `• 📋 *Rekapitulasi:* \`/ringkasan\` atau ketik \`rekap\`\n` +
+            `• 📁 *Ekspor Data:* \`/laporan\` atau \`export csv\`\n\n` +
+
+            `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `💡 *Tips:* Ketik perintah dengan santai, AI Moni akan berusaha memahaminya. Moni siap membantu 24/7! 🚀`;
+        return await ctx.reply(helpMessage, {
+            parse_mode: 'Markdown',
+            link_preview_options: { is_disabled: true } // Standard Telegraf v4+ murni
+        });
+    }
+
+    // ─── 🛠️ AMANKAN LOGIC CEK TABUNGAN DI SINI (TARUH DI ATAS BEGALAN REGEX) ───
+    const cekTabunganKeywords = ['cek tabungan', 'progres impian', 'progres tabungan', 'target tabungan', 'lihat tabungan', 'list tabungan', 'celengan'];
+    if (cekTabunganKeywords.some(k => pesan.includes(k))) {
+        await ctx.reply("🔍 Menarik data target celengan keluarga dari database...");
+        
+        try {
+            // Tarik data target tabungan yang masih aktif dari Supabase
+            const { data: goals, error } = await supabase
+                .from('saving_goals')
+                .select('*')
+                .eq('status', 'active')
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            if (!goals || goals.length === 0) {
+                return await ctx.reply("🎯 Belum ada target impian aktif yang tercatat di database nih, Cuy. Yuk buat target baru via Dashboard Web!");
+            }
+
+            let reportText = `━━━━━━━━━━━━━━━━━━━━━━━━\n🎯 *PROGRESS TARGET CELENGAN KELUARGA* \n━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+            
+            goals.forEach((g, idx) => {
+                const current = Number(g.current_amount || 0);
+                const target = Number(g.target_amount || 0);
+                const progressPct = Math.min(Math.round((current / target) * 100), 100);
+                
+                // Format sisa tenggat jika ada kolom deadline (gunakan g.deadline sesuai schema DB lu)
+                const deadlineText = g.deadline 
+                    ? `📅 Tenggat: ${new Date(g.deadline).toLocaleDateString('id-ID', { month: 'short', year: 'numeric' })}` 
+                    : '📅 Tanpa Tenggat';
+
+                reportText += `${idx + 1}. *${g.name}*\n`;
+                reportText += `   💰 Progress: *${formatIDR(current)}* / ${formatIDR(target)} (*${progressPct}%*)\n`;
+                reportText += `   ${deadlineText}\n\n`;
+            });
+
+            reportText += `━━━━━━━━━━━━━━━━━━━━━━━━\n🚀 Semangat alokasikan sisa saldo kantong bulanan lu berdua!`;
+            return await ctx.replyWithMarkdown(reportText);
+
+        } catch (err) {
+            console.error("❌ Gagal mengambil list tabungan via Telegram:", err);
+            return await ctx.reply("⚠️ Waduh, Moni gagal menarik data tabungan. Sila cek koneksi database Supabase lu.");
+        }
     }
 
     // SAPAAN
@@ -752,44 +891,64 @@ bot.on('text', async (ctx) => {
         return await ctx.reply(naturalReply);
     }
 
-    // TRANSAKSI
+    // TRANSAKSI & SAVING GOALS DETECTION
     const punyaNominal = /\d+[.,]?\d*\s*(rb|ribu|k|jt|juta|m|milyar|miliar)?/i.test(pesan);
-    const transaksiKeywords = /beli|bayar|jajan|makan|minum|belanja|transfer|masuk|gaji|bonus|topup|isi|pulsa|servis|bensin|parkir/i.test(pesan);
+    const transaksiKeywords = /beli|bayar|jajan|makan|minum|belanja|transfer|masuk|gaji|bonus|topup|isi|pulsa|servis|bensin|parkir|nabung|tabungan|tabung/i.test(pesan);
     const isKemungkinanTransaksi = punyaNominal || transaksiKeywords;
 
     if (isKemungkinanTransaksi) {
         await ctx.reply("⏳ Sebentar, Moni proses transaksinya...");
 
         let hasilParse = null;
-        try { hasilParse = await parseFinancialText(pesanAsli); } catch {}
+        try { hasilParse = await parseFinancialText(pesanAsli); } catch { }
         if (!hasilParse) {
             const manualResult = parseTransactionManual(pesanAsli);
             if (manualResult) hasilParse = manualResult as any;
         }
 
         if (hasilParse) {
-            const { amount, description, type, actor: aiActor } = hasilParse;
+            const { amount, description, type, actor: aiActor, category, merchant, transaction_date, is_saving_goal, goal_name } = hasilParse;
             const finalActor = aiActor === 'auto' ? ctx.state.actor : aiActor;
 
-            const txId = 'tx' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
-            pendingTransactions.set(txId, { amount, actor: finalActor, description, type, timestamp: Date.now() });
+            const txId = (is_saving_goal ? 'sg' : 'tx') + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+            pendingTransactions.set(txId, {
+                amount, actor: finalActor, description, type, timestamp: Date.now(),
+                category, merchant, transaction_date, is_saving_goal, goal_name
+            });
 
             const formattedAmount = formatIDR(amount);
-            const tipeText = type === 'income' ? 'Pemasukan' : type === 'expense' ? 'Pengeluaran' : 'Transfer';
-            const tipeEmoji = type === 'income' ? '🟢' : type === 'expense' ? '🔴' : '🔵';
             const actorEmojiPreview = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
-
             const keyboardButtons = await getPocketButtons(txId);
 
-            await ctx.reply(
-                `━━━━━━━━━━━━━━━━━━━\n💳 *KONFIRMASI ALOKASI DANA*\n━━━━━━━━━━━━━━━━━━━\n\n` +
-                `📝 *${description}*\n` +
-                `💰 Nominal: *${formattedAmount}*\n` +
-                `${tipeEmoji} Tipe: *${tipeText}*\n` +
-                `👤 Oleh: ${actorEmojiPreview}\n\n` +
-                `Pilih sumber dana:`,
-                { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboardButtons } }
-            );
+            // RENDER INTERAKTIF JIKA INTENTNYA ADALAH SAVING GOALS (FITUR 4)
+            if (is_saving_goal && goal_name) {
+                await ctx.reply(
+                    `━━━━━━━━━━━━━━━━━━━\n🎯 *KONFIRMASI TARGET TABUNGAN*\n━━━━━━━━━━━━━━━━━━━\n\n` +
+                    `📦 Impian: *${goal_name}*\n` +
+                    `💰 Setoran: *${formattedAmount}*\n` +
+                    `👤 Oleh: ${actorEmojiPreview}\n\n` +
+                    `Pilih kantong dana sumber setoran tabungan:`,
+                    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboardButtons } }
+                );
+            } else {
+                // RENDER TRANSAKSI BELANJA GRANULAR NORMAL (FITUR 1)
+                const tipeText = type === 'income' ? 'Pemasukan' : type === 'expense' ? 'Pengeluaran' : 'Transfer';
+                const tipeEmoji = type === 'income' ? '🟢' : type === 'expense' ? '🔴' : '🔵';
+                const dateText = new Date(transaction_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
+                await ctx.reply(
+                    `━━━━━━━━━━━━━━━━━━━\n💳 *KONFIRMASI ALOKASI DANA*\n━━━━━━━━━━━━━━━━━━━\n\n` +
+                    `📝 *${description}*\n` +
+                    `💰 Nominal: *${formattedAmount}*\n` +
+                    `🏬 Toko: *${merchant}*\n` +
+                    `🏷️ Kategori: *${category.replace('_', ' ')}*\n` +
+                    `📅 Tanggal: *${dateText}*\n` +
+                    `${tipeEmoji} Tipe: *${tipeText}*\n` +
+                    `👤 Oleh: ${actorEmojiPreview}\n\n` +
+                    `Pilih sumber dana:`,
+                    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboardButtons } }
+                );
+            }
             return;
         } else {
             await ctx.reply(
@@ -798,7 +957,7 @@ bot.on('text', async (ctx) => {
                 "📝 *Format yang benar:*\n" +
                 "• \"Beli kopi 35rb\"\n" +
                 "• \"Gaji masuk 5jt\"\n" +
-                "• \"Bayar wifi 350rb\"\n\n" +
+                "• \"Nabung beli kulkas 700rb\"\n\n" +
                 "💡 Ketik *help* untuk bantuan.",
                 { parse_mode: 'Markdown' }
             );
@@ -819,7 +978,7 @@ bot.on('callback_query', async (ctx) => {
     const callbackData = ctx.callbackQuery.data;
     if (!callbackData) return;
 
-    if (callbackData.startsWith('p:')) {
+ if (callbackData.startsWith('p:')) {
         await ctx.answerCbQuery("⏳ Memproses...");
         const parts = callbackData.split(':');
         const txId = parts[1];
@@ -828,34 +987,75 @@ bot.on('callback_query', async (ctx) => {
         const txData = pendingTransactions.get(txId);
         if (!txData) { await ctx.answerCbQuery("❌ Data expired."); return; }
 
-        const { amount, actor, description, type } = txData;
+        const { amount, actor, description, type, category, merchant, transaction_date } = txData;
         pendingTransactions.delete(txId);
 
         try {
-            const { data: pocketData } = await supabase.from('pockets').select('id, ownership').eq('name', selectedPocket).single();
+            // Tarik data kantong lengkap dengan asset_id relasi induknya murni
+            const { data: pocketData } = await supabase
+                .from('pockets')
+                .select('id, ownership, current_balance, asset_id') // <-- SUNTIK asset_id & current_balance
+                .eq('name', selectedPocket)
+                .single();
+                
             const finalPocketId = pocketData?.id || 1;
+            const linkedAssetId = pocketData?.asset_id; // <-- AMBIL RELASI INDUKNYA
             const transactionType = type || 'expense';
+            const modifier = transactionType === 'expense' ? -1 : 1;
 
+            // A. EKSEKUSI TRANSAKSI JOURNAL UTAMA
             const { error: dbError } = await supabase.from('transactions').insert([{
-                amount, description, type: transactionType, pocket_id: finalPocketId, asset_id: 1, actor
+                amount,
+                description,
+                type: transactionType,
+                pocket_id: finalPocketId,
+                asset_id: linkedAssetId || 1, // <-- GUNAKAN ASSET ID YANG RELASIONAL, BUKAN HARDCODE 1
+                actor,
+                category: category || 'lainnya',
+                merchant: merchant || 'umum',
+                created_at: transaction_date || new Date().toISOString()
             }]);
             if (dbError) throw dbError;
 
-            const { data: currentPocket } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
-            if (currentPocket) {
-                const modifier = transactionType === 'expense' ? -1 : 1;
-                await supabase.from('pockets').update({ current_balance: Number(currentPocket.current_balance) + (amount * modifier) }).eq('id', finalPocketId);
+            // B. UPDATE SALDO BERJALAN DI KANTONG (POCKETS)
+            if (pocketData) {
+                await supabase.from('pockets')
+                    .update({ current_balance: Number(pocketData.current_balance) + (amount * modifier) })
+                    .eq('id', finalPocketId);
             }
+
+            // C. 🆕 SUNTIKAN PERBAIKAN: POTONG REKENING INDUK (ASSETS) SECARA REAL-TIME BULLETPROOF
+            if (linkedAssetId) {
+                const { data: assetData } = await supabase
+                    .from('assets')
+                    .select('balance')
+                    .eq('id', linkedAssetId)
+                    .single();
+
+                if (assetData) {
+                    await supabase.from('assets')
+                        .update({ balance: Number(assetData.balance) + (amount * modifier) })
+                        .eq('id', linkedAssetId);
+                }
+            }
+
+            // D. 🚨 CHECK LOW FUND WARNING (NEW!)
+            const newPocketBalance = Number(pocketData?.current_balance || 0) + (amount * modifier);
+            await checkAndNotifyLowFund(ctx, selectedPocket, newPocketBalance, actor);
 
             const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
             const aiStatus = getAIStatus();
             const pocketIcon = getPocketIcon(pocketData?.ownership || 'bersama');
             const cleanPocket = formatPocketName(selectedPocket);
+            const dateText = new Date(transaction_date || new Date()).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 
             await ctx.editMessageText(
                 `━━━━━━━━━━━━━━━━━━━\n✅ *TRANSAKSI BERHASIL*\n━━━━━━━━━━━━━━━━━━━\n\n` +
                 `📝 *${description}*\n` +
                 `💰 Nominal: *${formatIDR(amount)}*\n` +
+                `🏬 Toko: *${merchant || 'umum'}*\n` +
+                `🏷️ Kategori: *${(category || 'lainnya').replace('_', ' ')}*\n` +
+                `📅 Tanggal: *${dateText}*\n` +
                 `🔄 Jenis: ${type === 'expense' ? '🔴 Pengeluaran' : type === 'income' ? '🟢 Pemasukan' : '🔵 Transfer'}\n` +
                 `📂 Kantong: ${pocketIcon} ${cleanPocket}\n` +
                 `👤 Eksekutor: ${actorEmoji}\n` +
@@ -871,6 +1071,119 @@ bot.on('callback_query', async (ctx) => {
             await ctx.editMessageText("❌ Gagal menyimpan, coba lagi.").catch(() => { });
         }
     }
+    // INTERSEPTOR CALLBACK QUERY BARU KHUSUS PROSES SAVING GOALS (FITUR 4)
+else if (callbackData.startsWith('sg:')) {
+        await ctx.answerCbQuery("⏳ Memproses Tabungan...");
+        const parts = callbackData.split(':');
+        const txId = parts[1];
+        const selectedPocket = parts[2];
+
+        const txData = pendingTransactions.get(txId);
+        if (!txData) { await ctx.answerCbQuery("❌ Data expired."); return; }
+
+        const { amount, actor, goal_name } = txData;
+        pendingTransactions.delete(txId);
+
+        try {
+            const cleanedGoalName = goal_name ? goal_name.replace(/^(beli|buat|untuk|tabung|nabung)\s+/i, '').trim() : '';
+
+            let { data: goal, error: gError } = await supabase
+                .from('saving_goals')
+                .select('*')
+                .ilike('name', cleanedGoalName)
+                .eq('status', 'active')
+                .maybeSingle();
+
+            if (!goal) {
+                const { data: newGoal, error: createGoalErr } = await supabase
+                    .from('saving_goals')
+                    .insert([{ name: goal_name, target_amount: 5000000, current_amount: 0, status: 'active' }])
+                    .select()
+                    .single();
+                if (createGoalErr) throw createGoalErr;
+                goal = newGoal;
+            }
+
+            // A. AMBIL DATA KANTONG DANA ASAL BESERTA ASSET_ID RELASINYA MURNI
+            const { data: pocketData } = await supabase
+                .from('pockets')
+                .select('id, current_balance, asset_id') // <-- AMBIL KOLOM asset_id NYA JUGA
+                .eq('name', selectedPocket)
+                .single();
+                
+            if (!pocketData) throw new Error('Kantong asal tidak valid.');
+
+            const finalPocketId = pocketData.id;
+            const linkedAssetId = pocketData.asset_id; // <-- SIMPAN ID RELASI ASSET INDUKNYA
+
+            // B. CATAT KE SAVING LOGS TABUNGAN
+            const { error: logErr } = await supabase.from('saving_logs').insert([{
+                goal_id: goal.id,
+                amount,
+                source_pocket_id: finalPocketId,
+                actor
+            }]);
+            if (logErr) throw logErr;
+
+            // C. UPDATE NOMINAL TERKUMPUL DI CELENGAN
+            const newGoalAmount = Number(goal.current_amount || 0) + amount;
+            const isAchieved = newGoalAmount >= Number(goal.target_amount);
+            await supabase.from('saving_goals')
+                .update({ current_amount: newGoalAmount, status: isAchieved ? 'achieved' : 'active' })
+                .eq('id', goal.id);
+
+            // D. UPDATE SALDO BERKURANG DI KANTONG (POCKETS)
+            await supabase.from('pockets')
+                .update({ current_balance: Number(pocketData.current_balance) - amount })
+                .eq('id', finalPocketId);
+
+            // E. 🆕 SUNTIKAN PERBAIKAN: POTONG SALDO REKENING INDUK (ASSETS) SAAT NABUNG JUGA BIAR NET WORTH DI WEB SINKRON!
+            if (linkedAssetId) {
+                const { data: assetData } = await supabase
+                    .from('assets')
+                    .select('balance')
+                    .eq('id', linkedAssetId)
+                    .single();
+
+                if (assetData) {
+                    await supabase.from('assets')
+                        .update({ balance: Number(assetData.balance) - amount })
+                        .eq('id', linkedAssetId);
+                }
+            }
+
+            // F. 🚨 CHECK LOW FUND WARNING
+            const newPocketBalance = Number(pocketData.current_balance) - amount;
+            await checkAndNotifyLowFund(ctx, selectedPocket, newPocketBalance, actor);
+
+            // G. MASUKKAN SEBAGAI MUTASI DI JOURNAL UTAMA
+            await supabase.from('transactions').insert([{
+                amount,
+                description: `Setoran tabungan: ${goal.name}`,
+                type: 'transfer',
+                pocket_id: finalPocketId,
+                asset_id: linkedAssetId || 1, // <-- Gunakan dinamis linkedAssetId hasil mapping
+                category: 'investasi_tabungan',
+                merchant: 'Moni Saving'
+            }]);
+
+            const progressPct = Math.min(Math.round((newGoalAmount / Number(goal.target_amount)) * 100), 100);
+            const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
+
+            await ctx.editMessageText(
+                `━━━━━━━━━━━━━━━━━━━\n🎯 *SETORAN TABUNGAN SUKSES*\n━━━━━━━━━━━━━━━━━━━\n\n` +
+                `📦 Target: *${goal.name}*\n` +
+                `💰 Nominal: *${formatIDR(amount)}*\n` +
+                `📂 Sumber: *${formatPocketName(selectedPocket)}*\n` +
+                `📊 Progress: *${formatIDR(newGoalAmount)}* / ${formatIDR(Number(goal.target_amount))} (*${progressPct}%*)\n` +
+                `👤 Pengirim: ${actorEmoji}\n\n` +
+                `${isAchieved ? '🎉 GOKIL LU CUY! Target tabungan ini sudah terpenuhi 100%. Siap dibeli! 🛍️' : '🚀 Semangat, kumpulkan terus jatah celengan lu berdua!'}`
+            );
+        } catch (err) {
+            console.error("❌ Saving goal callback error:", err);
+            await ctx.editMessageText("❌ Gagal memproses tabungan.").catch(() => { });
+        }
+    }
     else if (callbackData.startsWith('paybill:')) {
         await ctx.answerCbQuery("⏳ Memproses...");
         const parts = callbackData.split(':');
@@ -883,18 +1196,43 @@ bot.on('callback_query', async (ctx) => {
 
         try {
             await supabase.from('bills').update({ status: 'paid', last_paid_at: new Date().toISOString() }).eq('id', billId);
-            const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', selectedPocket).single();
+            const { data: pocketData } = await supabase.from('pockets').select('id, current_balance, asset_id').eq('name', selectedPocket).single();
             const finalPocketId = pocketData?.id || 1;
-            await supabase.from('transactions').insert([{ amount, description: `Bayar tagihan: ${billName}`, type: 'expense', pocket_id: finalPocketId, asset_id: 1, actor }]);
+            const linkedAssetId = pocketData?.asset_id;
+
+            // Sertifikasi kolom granular saat bayar tagihan rutin (DENGAN ASSET_ID YANG BENAR)
+            await supabase.from('transactions').insert([{
+                amount,
+                description: `Bayar tagihan: ${billName}`,
+                type: 'expense',
+                pocket_id: finalPocketId,
+                asset_id: linkedAssetId || 1,
+                actor,
+                category: 'tagihan_rutin',
+                merchant: billName
+            }]);
+
             const { data: cp } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
             if (cp) await supabase.from('pockets').update({ current_balance: Number(cp.current_balance) - amount }).eq('id', finalPocketId);
+            
+            // 🆕 KURANGI ASSETS SOURCE JUGA (FIX KRITIS!)
+            if (linkedAssetId) {
+                const { data: assetData } = await supabase.from('assets').select('balance').eq('id', linkedAssetId).single();
+                if (assetData) {
+                    await supabase.from('assets').update({ balance: Number(assetData.balance) - amount }).eq('id', linkedAssetId);
+                }
+            }
+
+            // 🚨 CHECK LOW FUND WARNING
+            const newPocketBalance = (cp?.current_balance || 0) - amount;
+            await checkAndNotifyLowFund(ctx, selectedPocket, newPocketBalance, actor);
 
             const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
             await ctx.editMessageText(
-                `━━━━━━━━━━━━━━━━━━━\n✅ *TAGIHAN LUNAS!*\n━━━━━━━━━━━━━━━━━━━\n\n📝 ${billName}\n💰 ${formatIDR(amount)}\n📂 ${formatPocketName(selectedPocket)}\n👤 ${actorEmoji}\n\n🎉 Tagihan berhasil dibayar!`,
+                `━━━━━━━━━━━━━━━━━━━\n✅ *TAGIHAN LUNAS!*\n━━━━━━━━━━━━━━━━━━━\n\n📝 ${billName}\n💰 ${formatIDR(amount)}\n🏬 Merchant: *${billName}*\n🏷️ Kategori: *tagihan rutin*\n📂 ${formatPocketName(selectedPocket)}\n👤 ${actorEmoji}\n\n🎉 Tagihan berhasil dibayar!`,
                 { parse_mode: 'Markdown' }
             );
-            sendTransactionEmailNotification({ actor, amount, description: `Bayar tagihan: ${billName}`, type: 'expense', pocketName: selectedPocket }).catch(() => {});
+            sendTransactionEmailNotification({ actor, amount, description: `Bayar tagihan: ${billName}`, type: 'expense', pocketName: selectedPocket }).catch(() => { });
         } catch (error) {
             console.error("❌ Paybill error:", error);
             await ctx.editMessageText("❌ Gagal bayar tagihan.").catch(() => { });
@@ -915,18 +1253,43 @@ bot.on('callback_query', async (ctx) => {
             if (!inst) { await ctx.answerCbQuery("❌ Data tidak ditemukan."); return; }
             const newPaidMonths = Number(inst.paid_months) + 1;
             await supabase.from('installments').update({ paid_months: newPaidMonths }).eq('id', installmentId);
-            const { data: pocketData } = await supabase.from('pockets').select('id').eq('name', selectedPocket).single();
+            const { data: pocketData } = await supabase.from('pockets').select('id, current_balance, asset_id').eq('name', selectedPocket).single();
             const finalPocketId = pocketData?.id || 1;
-            await supabase.from('transactions').insert([{ amount, description: `Bayar cicilan: ${installmentName} (Bln ke-${newPaidMonths})`, type: 'expense', pocket_id: finalPocketId, asset_id: 1, actor }]);
+            const linkedAssetId = pocketData?.asset_id;
+
+            // Sertifikasi kolom granular saat bayar cicilan kredit (DENGAN ASSET_ID YANG BENAR)
+            await supabase.from('transactions').insert([{
+                amount,
+                description: `Bayar cicilan: ${installmentName} (Bln ke-${newPaidMonths})`,
+                type: 'expense',
+                pocket_id: finalPocketId,
+                asset_id: linkedAssetId || 1,
+                actor,
+                category: 'tagihan_rutin',
+                merchant: installmentName
+            }]);
+
             const { data: cp } = await supabase.from('pockets').select('current_balance').eq('id', finalPocketId).single();
             if (cp) await supabase.from('pockets').update({ current_balance: Number(cp.current_balance) - amount }).eq('id', finalPocketId);
+            
+            // 🆕 KURANGI ASSETS SOURCE JUGA (FIX KRITIS!)
+            if (linkedAssetId) {
+                const { data: assetData } = await supabase.from('assets').select('balance').eq('id', linkedAssetId).single();
+                if (assetData) {
+                    await supabase.from('assets').update({ balance: Number(assetData.balance) - amount }).eq('id', linkedAssetId);
+                }
+            }
+
+            // 🚨 CHECK LOW FUND WARNING
+            const newPocketBalance = (cp?.current_balance || 0) - amount;
+            await checkAndNotifyLowFund(ctx, selectedPocket, newPocketBalance, actor);
 
             const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
             await ctx.editMessageText(
                 `━━━━━━━━━━━━━━━━━━━\n✅ *CICILAN DIBAYAR!*\n━━━━━━━━━━━━━━━━━━━\n\n📝 ${installmentName}\n💰 ${formatIDR(amount)}\n📊 Bulan ke-${newPaidMonths}\n📂 ${formatPocketName(selectedPocket)}\n👤 ${actorEmoji}\n\n🏠 Satu bulan lagi terbayar!`,
                 { parse_mode: 'Markdown' }
             );
-            sendTransactionEmailNotification({ actor, amount, description: `Bayar cicilan: ${installmentName}`, type: 'expense', pocketName: selectedPocket }).catch(() => {});
+            sendTransactionEmailNotification({ actor, amount, description: `Bayar cicilan: ${installmentName}`, type: 'expense', pocketName: selectedPocket }).catch(() => { });
         } catch (error) {
             console.error("❌ Payinstall error:", error);
             await ctx.editMessageText("❌ Gagal bayar cicilan.").catch(() => { });
@@ -956,20 +1319,27 @@ bot.on('photo', async (ctx) => {
         const hasilParse = await parseFinancialImage(imageBuffer, 'image/jpeg');
 
         if (hasilParse) {
-            const { amount, description, type, actor: aiActor } = hasilParse;
+            const { amount, description, type, actor: aiActor, category, merchant, transaction_date } = hasilParse;
             const finalActor = aiActor === 'auto' ? ctx.state.actor : aiActor;
 
             const txId = 'img' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
-            pendingTransactions.set(txId, { amount, actor: finalActor, description, type, timestamp: Date.now() });
+            pendingTransactions.set(txId, {
+                amount, actor: finalActor, description, type, timestamp: Date.now(),
+                category, merchant, transaction_date
+            });
 
             const formattedAmount = formatIDR(amount);
             const actorEmojiPreview = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
             const keyboardButtons = await getPocketButtons(txId);
+            const dateText = new Date(transaction_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 
             await ctx.reply(
                 `━━━━━━━━━━━━━━━━━━━\n💳 *KONFIRMASI ALOKASI DANA (STRUK)*\n━━━━━━━━━━━━━━━━━━━\n\n` +
                 `📝 *${description}*\n` +
                 `💰 Nominal: *${formattedAmount}*\n` +
+                `🏬 Toko: *${merchant}*\n` +
+                `🏷️ Kategori: *${category.replace('_', ' ')}*\n` +
+                `📅 Tanggal: *${dateText}*\n` +
                 `🔴 Tipe: *Pengeluaran*\n` +
                 `👤 Oleh: ${actorEmojiPreview}\n\n` +
                 `Pilih sumber dana:`,
