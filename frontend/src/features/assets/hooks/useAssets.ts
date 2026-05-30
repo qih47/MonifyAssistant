@@ -7,16 +7,34 @@ export interface Asset {
   category: string;
   balance: number;
   gold_weight_gram: number;
-  ownership: 'bersama' | 'suami' | 'istri'; // SUNTIKAN ENTERPRISE KEPEMILIKAN!
+  ownership: 'bersama' | 'suami' | 'istri';
   created_at?: string;
 }
 
 export const useAssets = () => {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
-  const [goldPrice, setGoldPrice] = useState<number>(1450000); // Harga buyback default per gram (Rp)
 
-  // 1. AMBIL DATA ASET (SELECT + OWNERSHIP)
+  // Harga emas dari localStorage, default 1.450.000
+  const [goldPrice, setGoldPrice] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('monify_gold_price');
+      return saved ? Number(saved) : 1450000;
+    } catch {
+      return 1450000;
+    }
+  });
+
+  // Update harga emas + simpan ke localStorage
+  const updateGoldPrice = (newPrice: number) => {
+    setGoldPrice(newPrice);
+    try {
+      localStorage.setItem('monify_gold_price', String(newPrice));
+    } catch (e) {
+      console.error('Gagal simpan harga emas ke localStorage:', e);
+    }
+  };
+
   const fetchAssets = async () => {
     try {
       setLoading(true);
@@ -33,7 +51,7 @@ export const useAssets = () => {
         category: row.category,
         balance: Number(row.balance || 0),
         gold_weight_gram: Number(row.gold_weight_gram || 0),
-        ownership: row.ownership || 'bersama', // Fallback aman ke bersama
+        ownership: row.ownership || 'bersama',
         created_at: row.created_at
       }));
 
@@ -45,19 +63,11 @@ export const useAssets = () => {
     }
   };
 
-  // 2. TAMBAH ASET BARU (INSERT)
   const addAsset = async (name: string, category: string, balance: number, goldWeight: number, ownership: string) => {
     try {
       const { error } = await supabase
         .from('assets')
-        .insert([{ 
-          name, 
-          category, 
-          balance, 
-          gold_weight_gram: goldWeight,
-          ownership // Masuk database murni, Cuy!
-        }]);
-
+        .insert([{ name, category, balance, gold_weight_gram: goldWeight, ownership }]);
       if (error) throw error;
       await fetchAssets();
       return { success: true };
@@ -67,20 +77,12 @@ export const useAssets = () => {
     }
   };
 
-  // 3. EDIT ASET (UPDATE)
   const updateAsset = async (id: string, name: string, category: string, balance: number, goldWeight: number, ownership: string) => {
     try {
       const { error } = await supabase
         .from('assets')
-        .update({ 
-          name, 
-          category, 
-          balance, 
-          gold_weight_gram: goldWeight,
-          ownership // Perubahan kepemilikan diakomodasi
-        })
+        .update({ name, category, balance, gold_weight_gram: goldWeight, ownership })
         .eq('id', id);
-
       if (error) throw error;
       await fetchAssets();
       return { success: true };
@@ -90,7 +92,6 @@ export const useAssets = () => {
     }
   };
 
-  // 4. HAPUS ASET (DELETE)
   const deleteAsset = async (id: string) => {
     try {
       const { error } = await supabase.from('assets').delete().eq('id', id);
@@ -103,9 +104,7 @@ export const useAssets = () => {
     }
   };
 
-  useEffect(() => {
-    fetchAssets();
-  }, []);
+  useEffect(() => { fetchAssets(); }, []);
 
-  return { assets, loading, goldPrice, addAsset, updateAsset, deleteAsset, refreshAssets: fetchAssets };
+  return { assets, loading, goldPrice, updateGoldPrice, addAsset, updateAsset, deleteAsset, refreshAssets: fetchAssets };
 };

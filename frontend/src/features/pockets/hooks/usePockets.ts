@@ -17,7 +17,8 @@ export interface Pocket {
 export interface Asset {
   id: number;
   name: string;
-  balance: number; // ✅ Ganti jadi balance
+  balance: number;
+  category?: string; // 🔥 TAMBAHKAN INI
 }
 
 export const usePockets = () => {
@@ -28,7 +29,7 @@ export const usePockets = () => {
   const fetchPockets = async () => {
     try {
       setLoading(true);
-      
+
       // Query terpisah (hindari join error)
       const { data, error } = await supabase
         .from('pockets')
@@ -40,13 +41,13 @@ export const usePockets = () => {
       // Ambil asset_id dari pockets
       const assetIds = [...new Set((data || []).map((p: any) => p.asset_id).filter(Boolean))];
       let assetMap: Record<number, any> = {};
-      
+
       if (assetIds.length > 0) {
         const { data: assetsData } = await supabase
           .from('assets')
           .select('id, name, balance') // ✅ Ganti jadi balance
           .in('id', assetIds);
-        
+
         (assetsData || []).forEach(a => {
           assetMap[a.id] = a;
         });
@@ -77,17 +78,21 @@ export const usePockets = () => {
     try {
       const { data, error } = await supabase
         .from('assets')
-        .select('id, name, balance') // ✅ Ganti jadi balance
+        .select('id, name, balance, category')
         .order('name', { ascending: true });
 
       if (error) throw error;
-      
-      const mapped = (data || []).map(a => ({
+
+      // 🔥 Filter: exclude Emas/Logam Mulia
+      const filtered = (data || []).filter(a => a.category !== 'Emas');
+
+      const mapped = filtered.map(a => ({
         id: a.id,
         name: a.name,
-        balance: Number(a.balance || 0) // ✅ balance
+        balance: Number(a.balance || 0),
+        category: a.category
       }));
-      
+
       setAssets(mapped);
     } catch (err) {
       console.error('Error fetching assets:', err);
