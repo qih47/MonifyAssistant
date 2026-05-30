@@ -99,7 +99,10 @@ export const BillsPage = () => {
     if (formValues) {
       const updatedBill = { ...bill, pocket_id: formValues.pocketId };
       const r = await payBill(updatedBill, formValues.actor as 'suami' | 'istri');
-      if (!r.success) Swal.fire('Gagal!', r.error || 'Terjadi kesalahan!', 'error');
+      if (!r.success) {
+        const errorMsg = r.error && typeof r.error === 'object' ? (r.error as any).message || JSON.stringify(r.error) : (r.error || 'Terjadi kesalahan!');
+        Swal.fire('Gagal!', errorMsg, 'error');
+      }
       else Swal.fire('Sukses!', `Tagihan ${bill.name} berhasil dibayar.`, 'success');
     }
   };
@@ -148,7 +151,10 @@ export const BillsPage = () => {
       const updatedInst = { ...inst, pocket_id: formValues.pocketId };
       const r = await payInstallmentMonth(updatedInst, formValues.amount, formValues.actor as any);
       if (r.success) Swal.fire('Sukses!', 'Cicilan berhasil dibayar.', 'success');
-      else Swal.fire('Gagal!', r.error || 'Error!', 'error');
+      else {
+        const errorMsg = r.error && typeof r.error === 'object' ? (r.error as any).message || JSON.stringify(r.error) : (r.error || 'Error!');
+        Swal.fire('Gagal!', errorMsg, 'error');
+      }
     }
   };
 
