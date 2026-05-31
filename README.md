@@ -1693,3 +1693,42 @@ Sistem antarmuka web Monify dirancang dengan standar keindahan visual yang tingg
 - **Glassmorphism**: Top navbar dan elemen detail menggunakan perpaduan filter `backdrop-blur-md` dan lapisan transparan semi-putih/semi-hitam yang menyatu secara organik dengan latar belakang halaman.
 - **Harmoni Tema (Dark/Light mode)**: Transisi mode gelap yang lembut menggunakan warna dasar malam pekat (`slate-950`) dipadu dengan teks kontras tinggi (`slate-50`) guna mengurangi kelelahan mata saat pemantauan malam hari.
 - **Mikro-Animasi Hover**: Elemen tombol, kartu metrik, dan baris mutasi merespon kursor dengan animasi angkat (`-translate-y-1`), pelebaran skala (`scale-105`), serta perputaran dinamis (`animate-hover-spin` pada tombol segarkan data) yang menciptakan kesan antarmuka terasa hidup (_interactive experience_).
+
+---
+
+## 🧩 Backend Refactor — Module Structure
+
+Ringkasan:
+
+Setelah refaktor, `backend/src/` diorganisir untuk memisah tanggung jawab dan memudahkan pengembangan:
+
+```
+backend/src/
+├── index.ts                # Clean entry point, inisialisasi server & webhook
+├── bot/                    # Bot wiring: init, middleware, commands
+│   ├── init.ts
+│   └── middleware.ts
+├── handlers/               # Semua handler: text, callbacks, photo
+├── helpers/                # Utility murni: formatters, buttons, naturalResponse
+├── services/               # Business logic: transaction, pocket, asset, lowFund
+├── state/                  # Transient state (pendingTransactions)
+└── constants/              # Shared constants (keywords)
+```
+
+Perubahan praktis:
+
+- Middleware & handler registrations dipindah ke `bot/init.ts`.
+- Semua handler teks dan callback dipisah ke `handlers/*`.
+- Helpers dan constants dikonsolidasikan.
+- Tidak ada perubahan logika bisnis — hanya reorganisasi file.
+
+Build & run (backend):
+
+```powershell
+cd backend
+npm install
+npm run build    # compile TypeScript
+npm run dev      # dev server (tsx + nodemon)
+```
+
+Catatan: Anda dapat menambahkan ringkasan ini ke `README.md` utama jika ingin, atau saya bisa mencoba patch `README.md` langsung bila Anda mengizinkan saya menimpa konten panjangnya.
