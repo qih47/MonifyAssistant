@@ -1,174 +1,101 @@
-# ════════════════════════════════════════════════════════════════════════════════
-# MONIFY GITIGNORE - Financial Management System
-# ════════════════════════════════════════════════════════════════════════════════
-
-# ─── DEPENDENCIES ──────────────────────────────────────────────────────────
+```
+# Dependencies
 node_modules/
-pnpm-lock.yaml
-yarn.lock
-package-lock.json
-.pnpm-store/
-.npm/
-.yarn/
 
-# ─── ENVIRONMENT VARIABLES & SECRETS ────────────────────────────────────────
-.env
-.env.local
-.env.*.local
-.env.production
-.env.development
-.env.test
-.env.staging
-*.env.backup
-
-# ─── BUILD OUTPUT & COMPILATION ──────────────────────────────────────────────
+# Build outputs
 dist/
 build/
-.next/
-out/
-*.tsbuildinfo
-.vite/
+target/
 
-# ─── IDE & EDITOR CONFIG ─────────────────────────────────────────────────────
+# TypeScript/JavaScript specific
+*.tsbuildinfo
+*.js.map
+*.ts.map
+
+# Environment variables
+.env
+.env.local
+*.env.*
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE specific
 .vscode/
 .idea/
-.sublime-project
-.sublime-workspace
 *.swp
 *.swo
-*~
-.DS_Store
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
-.env.*.swp
 
-# ─── LOGS ────────────────────────────────────────────────────────────────────
-logs/
-*.log
+# Coverage reports
+coverage/
+htmlcov/
+*.coverage
+
+# Python related (if any Python in project)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+*.so
+.PyCharmCache/
+.mypy_cache/
+.pytest_cache/
+.tox/
+
+# Node.js related
 npm-debug.log*
-npm-error.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-pnpm-error.log*
-lerna-debug.log*
-.pnpm-debug.log
-debug.log
-
-# ─── OPERATING SYSTEM FILES ──────────────────────────────────────────────────
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# ─── TEMPORARY & CACHE FILES ─────────────────────────────────────────────────
+node_modules/
+npm-shrinkwrap.json
+package-lock.json
 .cache/
-.temp/
-.tmp/
-tmp/
-temp/
-*.tmp
-*.backup
-*.bak
-*.swp
-*.swo
-*~
 
-# ─── RUNTIME FILES ───────────────────────────────────────────────────────────
-.env.*.local
-.runtimeconfig.json
-.firebaserc
+# Compiled Binary Files
+*.exe
+*.dll
+*.so
+*.a
+*.o
+*.obj
+*.out
+*.class
 
-# ─── DATABASE FILES (Local SQLite, etc) ──────────────────────────────────────
-*.sqlite
-*.sqlite3
-*.db
-
-# ─── TESTING & COVERAGE ──────────────────────────────────────────────────────
-coverage/
-.nyc_output/
-junit.xml
-test-results/
-.jest-cache/
-
-# ─── DEPLOYMENT & DOCKER ─────────────────────────────────────────────────────
-.docker-compose.override.yml
-docker-compose.override.yml
-.env.docker
-.dockerignore.local
-
-# ─── NODE VERSION MANAGERS ───────────────────────────────────────────────────
-.nvm/
-.nvmrc.local
-.ruby-version
-.node-version.local
-
-# ─── DEPENDENCY LOCK FILES (Optional - uncomment if using exact lock files) ──
-# Uncomment berikut jika ingin strict lock file tracking:
-# package-lock.json
-# yarn.lock
-# pnpm-lock.yaml
-
-# ─── VITE SPECIFIC ───────────────────────────────────────────────────────────
-.vite/
-.vitecache
-
-# ─── TYPESCRIPT ───────────────────────────────────────────────────────────────
-*.d.ts.map
-tsbuildinfo.json
-
-# ─── TELEGRAM BOT SPECIFIC ───────────────────────────────────────────────────
-bot-messages.log
-bot-sessions/
-telegram-updates-history.json
-
-# ─── SUPABASE LOCAL DEVELOPMENT ──────────────────────────────────────────────
-.supabase/
-supabase/.env.local
-supabase/migrations/.history
-
-# ─── GEMINI & GROQ API LOGS ──────────────────────────────────────────────────
-ai-requests-log/
-api-quotas.json
-
-# ─── EMAIL SERVICE LOGS ──────────────────────────────────────────────────────
-email-logs/
-nodemailer-cache/
-
-# ─── FRONTEND BUILD & DIST ───────────────────────────────────────────────────
-frontend/dist/
-frontend/build/
-frontend/.vite/
-frontend/.next/
-
-# ─── BACKEND BUILD & DIST ───────────────────────────────────────────────────
-backend/dist/
-backend/build/
-backend/compiled/
-
-# ─── OPTIONAL: PRIVATE OR SENSITIVE FILES ───────────────────────────────────
-# Uncomment untuk exclude file sensitif atau testing data:
-# test-data/
-# secrets/
-# private-keys/
-# admin-scripts/
-# migration-backups/
-
-# ─── MONOREPO SPECIFIC ────────────────────────────────────────────────────────
-lerna-debug.log
-.project
-
-# ─── MISCELLANEOUS ───────────────────────────────────────────────────────────
-.envrc
-.vercelignore
-.gitignore.local
-*.DS_Store
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+```
