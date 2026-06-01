@@ -1,7 +1,7 @@
 import { supabase } from '../../config/supabaseClient.js';
 import { formatIDR, formatPocketName } from '../../helpers/formatters.js';
 import { getPocketIcon } from '../../helpers/iconMapper.js';
-import { generateNaturalResponse } from '../../helpers/naturalResponse.js';
+import { queryWithAIContext } from '../../services/aiService.js';
 
 export async function handleCekSaldo(ctx: any) {
     try {
@@ -10,13 +10,13 @@ export async function handleCekSaldo(ctx: any) {
         // 1. Ambil Data Pockets dari Supabase
         const { data: pockets, error: pocketError } = await supabase
             .from('pockets')
-            .select('name, current_balance, ownership');
+            .select('name, current_balance, ownership, asset_id');
         if (pocketError) throw pocketError;
 
-        // 2. Ambil Data Assets dari Supabase
+        // 2. Ambil Data Assets dari Supabase (dengan gold_weight_gram untuk emas)
         const { data: assets, error: assetError } = await supabase
             .from('assets')
-            .select('name, balance, ownership');
+            .select('name, balance, ownership, category, gold_weight_gram');
         if (assetError) throw assetError;
 
         let saldoBersama = 0, saldoQisthi = 0, saldoGita = 0;
@@ -37,17 +37,30 @@ export async function handleCekSaldo(ctx: any) {
 
         let assetText = "\n🏦 *ASET & REKENING FISIK:*\n";
         let totalAssetPhysical = 0;
+        let totalGoldWeight = 0;
+        
         assets?.forEach(a => {
-            const bal = Number(a.balance || 0);
-            totalAssetPhysical += bal;
-            assetText += `   • ${a.name} (${a.ownership}): *${formatIDR(bal)}*\n`;
+            const isGoldAsset = a.category?.includes('emas') || a.category?.includes('gold') || a.name.toLowerCase().includes('emas') || a.name.toLowerCase().includes('logam mulia');
+            
+            if (isGoldAsset && a.gold_weight_gram) {
+                // Gold asset: display weight and calculate value (using standard buyback rate)
+                totalGoldWeight += Number(a.gold_weight_gram || 0);
+                const goldValue = Number(a.gold_weight_gram || 0) * 1450000; // Rp 1.450.000/gram
+                totalAssetPhysical += goldValue;
+                assetText += `   • ${a.name} (${a.ownership}): *${a.gold_weight_gram} gram* (≈ ${formatIDR(goldValue)})\n`;
+            } else {
+                // Regular monetary asset
+                const bal = Number(a.balance || 0);
+                totalAssetPhysical += bal;
+                assetText += `   • ${a.name} (${a.ownership}): *${formatIDR(bal)}*\n`;
+            }
         });
 
         const totalSemuaKantong = saldoBersama + saldoQisthi + saldoGita;
 
-        // 3. Pancing AI dengan data database asli (Biar gak halu)
-        const contextAkurat = `User bernama ${userName} meminta cek saldo. Laporkan bahwa total dana di kantong anggaran adalah ${formatIDR(totalSemuaKantong)} dan total uang fisik di bank/e-wallet adalah ${formatIDR(totalAssetPhysical)}. Beri komentar singkat yang positif.`;
-        const naturalReply = await generateNaturalResponse(contextAkurat, userName);
+        // 3. Generate natural response with accurate DB context (prevents hallucination)
+        const aiContextMessage = `${userName} meminta cek saldo. Total kantong: ${formatIDR(totalSemuaKantong)}, Total aset fisik: ${formatIDR(totalAssetPhysical)}${totalGoldWeight > 0 ? `, Emas: ${totalGoldWeight} gram` : ''}. Beri komentar singkat positif.`;
+        const naturalReply = await queryWithAIContext(aiContextMessage, userName);
         
         // 4. KIRIM SATU PER SATU SECARA BERURUTAN (AWAIT)
         await ctx.reply(naturalReply);
@@ -61,7 +74,7 @@ export async function handleCekSaldo(ctx: any) {
             `${assetText}` +
             `━━━━━━━━━━━━━━━━━━━\n` +
             `📊 *Total Anggaran Kantong:* *${formatIDR(totalSemuaKantong)}*\n` +
-            `📊 *Total Saldo Rekening Fisik:* *${formatIDR(totalAssetPhysical)}*\n` +
+            `📊 *Total Aset Fisik:* *${formatIDR(totalAssetPhysical)}*\n` +
             `━━━━━━━━━━━━━━━━━━━\n🤖 Moni • Data akurat & real-time`;
 
         await ctx.replyWithMarkdown(reportText);
