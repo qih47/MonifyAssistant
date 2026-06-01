@@ -1,8 +1,9 @@
 import { supabase } from '../../config/supabaseClient.js';
-import { getPocketByName, updatePocketCurrentBalance } from '../../services/pocketService.js';
+import { getPocketById, updatePocketCurrentBalance } from '../../services/pocketService.js';
 import { getAssetById, updateAssetBalance } from '../../services/assetService.js';
 import { createTransaction } from '../../services/transactionService.js';
 import { checkAndNotifyLowFund } from '../../services/lowFundService.js';
+import { sendTransactionEmailNotification } from '../../services/notificationService.js';
 import { formatIDR, formatPocketName } from '../../helpers/formatters.js';
 
 export async function handleInstallmentCallback(ctx: any, callbackData: string) {
@@ -10,7 +11,7 @@ export async function handleInstallmentCallback(ctx: any, callbackData: string) 
     const parts = callbackData.split(':');
     const amount = Number(parts[1]);
     const actor = parts[2];
-    const selectedPocket = parts[3];
+    const selectedPocketId = parts[3];
     const encodedName = parts[4];
     const installmentId = parts[5];
     const installmentName = decodeURIComponent(encodedName);
@@ -21,7 +22,7 @@ export async function handleInstallmentCallback(ctx: any, callbackData: string) 
         const newPaidMonths = Number(inst.paid_months) + 1;
         await supabase.from('installments').update({ paid_months: newPaidMonths }).eq('id', installmentId);
 
-        const pocketData = await getPocketByName(selectedPocket);
+        const pocketData = await getPocketById(Number(selectedPocketId));
         const finalPocketId = pocketData?.id || 1;
         const linkedAssetId = pocketData?.asset_id;
 
@@ -49,14 +50,16 @@ export async function handleInstallmentCallback(ctx: any, callbackData: string) 
             }
         }
 
-        await checkAndNotifyLowFund(ctx, selectedPocket, newPocketBalance, actor);
+        const cleanPocket = pocketData?.display_name || formatPocketName(pocketData?.name || 'Kantong');
+
+        await checkAndNotifyLowFund(ctx, pocketData?.name || 'kantong', newPocketBalance, actor);
 
         const actorEmoji = actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
         await ctx.editMessageText(
-            `━━━━━━━━━━━━━━━━━━━\n✅ *CICILAN DIBAYAR!*\n━━━━━━━━━━━━━━━━━━━\n\n📝 ${installmentName}\n💰 ${formatIDR(amount)}\n📊 Bulan ke-${newPaidMonths}\n📂 ${formatPocketName(selectedPocket)}\n👤 ${actorEmoji}\n\n🏠 Satu bulan lagi terbayar!`,
+            `━━━━━━━━━━━━━━━━━━━\n✅ *CICILAN DIBAYAR!*\n━━━━━━━━━━━━━━━━━━━\n\n📝 ${installmentName}\n💰 ${formatIDR(amount)}\n📊 Bulan ke-${newPaidMonths}\n📂 ${cleanPocket}\n👤 ${actorEmoji}\n\n🏠 Satu bulan lagi terbayar!`,
             { parse_mode: 'Markdown' }
         );
-        sendTransactionEmailNotification({ actor, amount, description: `Bayar cicilan: ${installmentName}`, type: 'expense', pocketName: selectedPocket }).catch(() => { });
+        sendTransactionEmailNotification({ actor, amount, description: `Bayar cicilan: ${installmentName}`, type: 'expense', pocketName: pocketData?.name || 'Kantong' }).catch(() => { });
     } catch (error) {
         console.error('❌ Payinstall error:', error);
         await ctx.editMessageText('❌ Gagal bayar cicilan.').catch(() => { });

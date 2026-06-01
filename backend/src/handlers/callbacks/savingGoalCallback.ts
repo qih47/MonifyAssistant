@@ -1,5 +1,5 @@
 import { supabase } from '../../config/supabaseClient.js';
-import { getPocketByName, updatePocketCurrentBalance } from '../../services/pocketService.js';
+import { getPocketById, updatePocketCurrentBalance } from '../../services/pocketService.js';
 import { getAssetById, updateAssetBalance } from '../../services/assetService.js';
 import { createTransaction } from '../../services/transactionService.js';
 import { checkAndNotifyLowFund } from '../../services/lowFundService.js';
@@ -10,7 +10,7 @@ export async function handleSavingGoalCallback(ctx: any, callbackData: string) {
     await ctx.answerCbQuery('⏳ Memproses Tabungan...');
     const parts = callbackData.split(':');
     const txId = parts[1];
-    const selectedPocket = parts[2];
+    const selectedPocketId = parts[2];
 
     const txData = pendingTransactions.get(txId);
     if (!txData) { await ctx.answerCbQuery('❌ Data expired.'); return; }
@@ -38,7 +38,7 @@ export async function handleSavingGoalCallback(ctx: any, callbackData: string) {
             goal = newGoal;
         }
 
-        const pocketData = await getPocketByName(selectedPocket);
+        const pocketData = await getPocketById(Number(selectedPocketId));
         if (!pocketData) throw new Error('Kantong asal tidak valid.');
 
         const finalPocketId = pocketData.id;
@@ -68,7 +68,9 @@ export async function handleSavingGoalCallback(ctx: any, callbackData: string) {
         }
 
         const newPocketBalance = Number(pocketData.current_balance) - amount;
-        await checkAndNotifyLowFund(ctx, selectedPocket, newPocketBalance, actor);
+        const cleanPocket = pocketData?.display_name || formatPocketName(pocketData?.name || 'Kantong');
+        
+        await checkAndNotifyLowFund(ctx, pocketData.name || 'kantong', newPocketBalance, actor);
 
         await createTransaction({
             amount,
@@ -89,7 +91,7 @@ export async function handleSavingGoalCallback(ctx: any, callbackData: string) {
             `━━━━━━━━━━━━━━━━━━━\n🎯 *SETORAN TABUNGAN SUKSES*\n━━━━━━━━━━━━━━━━━━━\n\n` +
             `📦 Target: *${goal.name}*\n` +
             `💰 Nominal: *${formatIDR(amount)}*\n` +
-            `📂 Sumber: *${formatPocketName(selectedPocket)}*\n` +
+            `📂 Sumber: *${cleanPocket}*\n` +
             `📊 Progress: *${formatIDR(newGoalAmount)}* / ${formatIDR(Number(goal.target_amount))} (*${progressPct}%*)\n` +
             `👤 Pengirim: ${actorEmoji}\n\n` +
             `${isAchieved ? '🎉 GOKIL LU CUY! Target tabungan ini sudah terpenuhi 100%. Siap dibeli! 🛍️' : '🚀 Semangat, kumpulkan terus jatah celengan lu berdua!'}`

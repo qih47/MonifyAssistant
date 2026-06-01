@@ -5,6 +5,7 @@ import { formatIDR } from '../../helpers/formatters.js';
 import { generateNaturalResponse } from '../../helpers/naturalResponse.js';
 import { pendingTransactions } from '../../state/pendingTransactions.js';
 import { isPotentialTransaction } from '../../helpers/validators.js';
+import { analyzeReceiptType, mapReceiptTypeToSubtype } from '../../services/receiptAnalyzer.js';
 
 export async function handleFinancialText(ctx: any, pesanAsli: string, userName: string) {
     if (!isPotentialTransaction(pesanAsli)) {
@@ -41,9 +42,13 @@ export async function handleFinancialText(ctx: any, pesanAsli: string, userName:
         return true;
     }
 
-    const { amount, description, type, actor: aiActor, category, merchant, transaction_date, is_saving_goal, goal_name } = hasilParse;
+    const { amount, description, type, actor: aiActor, category, merchant, transaction_date, is_saving_goal, goal_name, transaction_subtype } = hasilParse;
     const finalActor = aiActor === 'auto' ? ctx.state.actor : aiActor;
     const txId = (is_saving_goal ? 'sg' : 'tx') + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+
+    const receiptAnalysis = analyzeReceiptType(description);
+    const subtypeFromAnalyzer = mapReceiptTypeToSubtype(receiptAnalysis.type);
+    const finalSubtype = transaction_subtype || (is_saving_goal ? 'saving_goal' : subtypeFromAnalyzer);
 
     pendingTransactions.set(txId, {
         amount,
@@ -55,7 +60,9 @@ export async function handleFinancialText(ctx: any, pesanAsli: string, userName:
         merchant,
         transaction_date,
         is_saving_goal,
-        goal_name
+        goal_name,
+        transaction_subtype: finalSubtype,
+        receipt_type: receiptAnalysis.type
     });
 
     const formattedAmount = formatIDR(amount);

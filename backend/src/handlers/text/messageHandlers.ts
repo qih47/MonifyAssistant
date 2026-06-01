@@ -30,9 +30,7 @@ export async function handleTextMessage(ctx: any) {
 
     if (matchesAnyKeyword(pesan, laporanKeywords)) return await handleLaporan(ctx);
 
-    if (matchesAnyKeyword(pesan, saldoKeywords)) {
-        const naturalReply = await generateNaturalResponse('User minta cek saldo.', userName);
-        await ctx.reply(naturalReply);
+    if (saldoKeywords.some(k => pesan.includes(k))) {
         return await handleCekSaldo(ctx);
     }
 
@@ -48,20 +46,20 @@ export async function handleTextMessage(ctx: any) {
             `Cukup ketik kalimat natural, Moni akan otomatis mendeteksi nominal, kategori, dan tipenya.\n` +
             `• 🛍️ *Pengeluaran:* \`Beli kopi starbucks 45rb\`\n` +
             `• 💵 *Pemasukan:* \`Gaji bulanan masuk 8.5jt\`\n` +
-            `• 📸 *Struk/Nota:* Kirim foto struk belanjaanmu, Moni akan baca otomatis via OCR!\n\n` +
+            `• 📸 *Struk/Nota:* Kirim foto struk belanjaanmu, Moni akan baca otomatis via OCR!\n` +
+            `• 💳 *Transfer Antar Asset:* \`Transfer ke GoPay 100rb\`\n\n` +
             `🎯 *2. MANAJEMEN TABUNGAN / IMPIAN*\n` +
             `Kelola alokasi dana khusus untuk barang impianmu.\n` +
             `• 📥 *Nabung:* \`Nabung Air Purifier 500rb\`\n` +
             `• 🔍 *Cek Target:* \`cek tabungan\` atau \`progres impian\`\n\n` +
             `💳 *3. TAGIHAN & CICILAN CONVENIENCE*\n` +
             `Moni bisa bantu kelola pos pengeluaran rutin.\n` +
-            `• 🌐 *Tagihan:* \`/bayar wifi\` atau \`bayar kosan 1.2jt\`\n` +
-            `• 🏍️ *Cicilan:* \`/cicil motor\` atau \`cicil mobil 2.5jt\`\n\n` +
+            `• 🌐 *Tagihan:* \`/bayar wifi\` atau \`bayar kosan 1.2jt\` atau kirim foto tagihan\n` +
+            `• 🏍️ *Cicilan:* \`/cicil motor\` atau \`cicil mobil 2.5jt\` atau kirim foto slip cicilan\n\n` +
             `📊 *4. MONITORING & LAPORAN*\n` +
             `Pantau kondisi kesehatan keuanganmu kapan saja.\n` +
             `• 💰 *Cek Saldo:* \`/saldo\` atau ketik \`cek saldo\`\n` +
-            `• 📉 *Alokasi Budget:* \`cek budget bulan ini\`\n` +
-            `• 📋 *Rekapitulasi:* \`/ringkasan\` atau ketik \`rekap\`\n` +
+            `• 📋 *Rekapitulasi Bulanan:* \`/ringkasan\` atau ketik \`rekap\`\n` +
             `• 📁 *Ekspor Data:* \`/laporan\` atau \`export csv\`\n\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
             `💡 *Tips:* Ketik perintah dengan santai, AI Moni akan berusaha memahaminya. Moni siap membantu 24/7! 🚀`;

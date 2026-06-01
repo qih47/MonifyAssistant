@@ -3,6 +3,12 @@ import { parseFinancialImage } from '../../services/aiService.js';
 import { formatIDR } from '../../helpers/formatters.js';
 import { getPocketButtons } from '../../helpers/buttons.js';
 import { pendingTransactions } from '../../state/pendingTransactions.js';
+import { 
+    analyzeReceiptType, 
+    getConfirmationTitle, 
+    extractEntityName,
+    mapReceiptTypeToSubtype 
+} from '../../services/receiptAnalyzer.js';
 
 export async function handlePhotoMessage(ctx: any) {
     try {
@@ -14,13 +20,27 @@ export async function handlePhotoMessage(ctx: any) {
         const hasilParse = await parseFinancialImage(imageBuffer, 'image/jpeg');
 
         if (hasilParse) {
-            const { amount, description, type, actor: aiActor, category, merchant, transaction_date } = hasilParse;
+            const { amount, description, type, actor: aiActor, category, merchant, transaction_date, transaction_subtype } = hasilParse;
             const finalActor = aiActor === 'auto' ? ctx.state.actor : aiActor;
 
             const txId = 'img' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+            
+            // NEW: Analyze receipt type for intelligent routing
+            const receiptAnalysis = analyzeReceiptType(description);
+            const subtypeFromAnalyzer = mapReceiptTypeToSubtype(receiptAnalysis.type);
+            const finalSubtype = transaction_subtype || subtypeFromAnalyzer;
+            
             pendingTransactions.set(txId, {
-                amount, actor: finalActor, description, type, timestamp: Date.now(),
-                category, merchant, transaction_date
+                amount, 
+                actor: finalActor, 
+                description, 
+                type, 
+                timestamp: Date.now(),
+                category, 
+                merchant, 
+                transaction_date,
+                receipt_type: receiptAnalysis.type,  // NEW: Store receipt type for routing
+                transaction_subtype: finalSubtype    // NEW: Store subtype (from AI or analyzer)
             });
 
             const formattedAmount = formatIDR(amount);
@@ -28,14 +48,21 @@ export async function handlePhotoMessage(ctx: any) {
             const keyboardButtons = await getPocketButtons(txId);
             const dateText = new Date(transaction_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 
+            // Dynamic type display based on AI parsing
+            const typeEmoji = type === 'income' ? '🟢' : type === 'transfer' ? '🔵' : '🔴';
+            const typeLabel = type === 'income' ? 'Pemasukan' : type === 'transfer' ? 'Transfer' : 'Pengeluaran';
+
+            // NEW: Use specialized confirmation title based on receipt type
+            const confirmationTitle = getConfirmationTitle(receiptAnalysis.type);
+
             await ctx.reply(
-                `━━━━━━━━━━━━━━━━━━━\n💳 *KONFIRMASI ALOKASI DANA (STRUK)*\n━━━━━━━━━━━━━━━━━━━\n\n` +
+                `━━━━━━━━━━━━━━━━━━━\n${confirmationTitle}\n━━━━━━━━━━━━━━━━━━━\n\n` +
                 `📝 *${description}*\n` +
                 `💰 Nominal: *${formattedAmount}*\n` +
-                `🏬 Toko: *${merchant}*\n` +
+                `🏬 Merchant: *${merchant}*\n` +
                 `🏷️ Kategori: *${category.replace('_', ' ')}*\n` +
                 `📅 Tanggal: *${dateText}*\n` +
-                `🔴 Tipe: *Pengeluaran*\n` +
+                `${typeEmoji} Tipe: *${typeLabel}*\n` +
                 `👤 Oleh: ${actorEmojiPreview}\n\n` +
                 `Pilih sumber dana:`,
                 { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboardButtons } }
