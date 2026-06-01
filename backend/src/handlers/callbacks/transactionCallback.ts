@@ -1,3 +1,4 @@
+import { supabase } from '../../config/supabaseClient.js';
 import { getPocketById, updatePocketCurrentBalance } from '../../services/pocketService.js';
 import { getAssetById, updateAssetBalance } from '../../services/assetService.js';
 import { createTransaction } from '../../services/transactionService.js';
@@ -6,9 +7,6 @@ import { sendTransactionEmailNotification } from '../../services/notificationSer
 import { getPocketIcon } from '../../helpers/iconMapper.js';
 import { formatPocketName, formatIDR } from '../../helpers/formatters.js';
 import { pendingTransactions } from '../../state/pendingTransactions.js';
-import { supabase } from '../../config/supabaseClient.js';
-import { extractEntityName } from '../../services/receiptAnalyzer.js';
-
 
 export async function handleTransactionCallback(ctx: any, callbackData: string) {
     await ctx.answerCbQuery('⏳ Memproses...');
@@ -46,10 +44,26 @@ export async function handleTransactionCallback(ctx: any, callbackData: string) 
             await updatePocketCurrentBalance(finalPocketId, newPocketBalance);
         }
 
+        // CRITICAL: Synchronize physical asset balance (including gold weight handling)
         if (linkedAssetId) {
             const assetData = await getAssetById(linkedAssetId);
             if (assetData) {
-                await updateAssetBalance(linkedAssetId, Number(assetData.balance) + (amount * modifier));
+                const isGoldAsset = assetData.category?.includes('emas') || assetData.category?.includes('gold') || 
+                                   assetData.name.toLowerCase().includes('emas') || assetData.name.toLowerCase().includes('logam mulia');
+                
+                if (isGoldAsset && assetData.gold_weight_gram) {
+                    // For gold assets, adjust weight instead of balance
+                    // Convert amount to grams (using Rp 1.450.000/gram buyback rate)
+                    const amountInGrams = amount / 1450000;
+                    const newGoldWeight = Number(assetData.gold_weight_gram) + (amountInGrams * modifier);
+                    await supabase
+                        .from('assets')
+                        .update({ gold_weight_gram: newGoldWeight })
+                        .eq('id', linkedAssetId);
+                } else {
+                    // Regular monetary asset: adjust balance
+                    await updateAssetBalance(linkedAssetId, Number(assetData.balance) + (amount * modifier));
+                }
             }
         }
 
@@ -128,5 +142,23 @@ export async function handleTransactionCallback(ctx: any, callbackData: string) 
     } catch (error) {
         console.error('❌ Callback error:', error);
         await ctx.editMessageText('❌ Gagal menyimpan, coba lagi.').catch(() => { });
+    }
+}
+
+// Helper function extracted from receiptAnalyzer for standalone use
+function extractEntityName(description: string, receiptType: string): string | null {
+    const desc = description.toLowerCase();
+    
+    switch (receiptType) {
+        case 'bill':
+            const billMatch = desc.match(/(listrik|wifi|pln|internet|air|gas|token|kosan|kosan wifi)/i);
+            return billMatch ? billMatch[1] : null;
+            
+        case 'installment':
+            const instMatch = desc.match(/(?:cicil|bayar)\s+([a-zA-Z\s]+?)(?:\d+|$)/i);
+            return instMatch ? instMatch[1].trim() : null;
+            
+        default:
+            return null;
     }
 }

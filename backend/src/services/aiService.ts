@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
+import { supabase } from '../config/supabaseClient.js';
 
 dotenv.config();
 
@@ -31,14 +32,72 @@ export interface ParsedTransaction {
     installment_name?: string;
 }
 
+// Database state snapshot for LLM context injection
+interface DatabaseStateSnapshot {
+    pockets: Array<{ id: number; name: string; display_name: string; current_balance: number; ownership: string }>;
+    assets: Array<{ id: number; name: string; balance: number; gold_weight_gram?: number; category: string; ownership: string }>;
+    unpaidBills: Array<{ id: number; name: string; amount: number }>;
+    activeInstallments: Array<{ id: number; name: string; monthly_amount: number; paid_months: number; tenor_months: number }>;
+}
+
 let groqAvailable = GROQ_API_KEY ? true : false;
 let geminiAvailable = GEMINI_API_KEY ? true : false;
 
+// Fetch lean database state snapshot for LLM context
+async function fetchDatabaseStateSnapshot(): Promise<DatabaseStateSnapshot | null> {
+    try {
+        const [pocketsResult, assetsResult, billsResult, installmentsResult] = await Promise.all([
+            supabase.from('pockets').select('id, name, display_name, current_balance, ownership'),
+            supabase.from('assets').select('id, name, balance, gold_weight_gram, category, ownership'),
+            supabase.from('bills').select('id, name, amount').eq('status', 'unpaid'),
+            supabase.from('installments').select('id, name, monthly_amount, paid_months, tenor_months')
+        ]);
+
+        const activeInstallments = (installmentsResult.data || [])
+            .filter(i => Number(i.tenor_months) > Number(i.paid_months));
+
+        return {
+            pockets: pocketsResult.data || [],
+            assets: assetsResult.data || [],
+            unpaidBills: billsResult.data || [],
+            activeInstallments
+        };
+    } catch (error) {
+        console.error('❌ Failed to fetch database state snapshot:', error);
+        return null;
+    }
+}
+
 // Shared Prompt Builder untuk standarisasi logika berpikir AI (Groq & Gemini)
-const getSystemInstruction = () => {
+const getSystemInstruction = (dbSnapshot?: DatabaseStateSnapshot) => {
     const hariIni = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    
+    let contextData = '';
+    if (dbSnapshot) {
+        const pocketsList = dbSnapshot.pockets.map(p => `- ${p.display_name || p.name} (${p.ownership}): Rp ${Number(p.current_balance).toLocaleString('id-ID')}`).join('\n');
+        const assetsList = dbSnapshot.assets.map(a => {
+            const balanceInfo = a.category?.includes('emas') || a.category?.includes('gold') 
+                ? `${a.gold_weight_gram || 0} gram` 
+                : `Rp ${Number(a.balance).toLocaleString('id-ID')}`;
+            return `- ${a.name} (${a.ownership}): ${balanceInfo}`;
+        }).join('\n');
+        const billsList = dbSnapshot.unpaidBills.length > 0 
+            ? dbSnapshot.unpaidBills.map(b => `- ${b.name}: Rp ${Number(b.amount).toLocaleString('id-ID')}`).join('\n')
+            : 'Tidak ada tagihan unpaid';
+        const installmentsList = dbSnapshot.activeInstallments.length > 0
+            ? dbSnapshot.activeInstallments.map(i => `- ${i.name}: Rp ${Number(i.monthly_amount).toLocaleString('id-ID')}/bulan (Bulan ${i.paid_months}/${i.tenor_months})`).join('\n')
+            : 'Tidak ada cicilan aktif';
+        
+        contextData = `
+\n📊 DATA KEUANGAN REAL-TIME (Gunakan ini untuk jawaban akurat):
+\n💼 KANTONG ANGGARAN:\n${pocketsList}
+\n🏦 ASET FISIK:\n${assetsList}
+\n📋 TAGIHAN BELUM DIBAYAR:\n${billsList}
+\n🏠 CICILAN AKTIF:\n${installmentsList}\n`;
+    }
+    
     return `Kamu adalah Moni, AI asisten keuangan keluarga cerdas untuk Qisthi (suami) dan Gita (istri).
-Hari ini adalah ${hariIni}.
+Hari ini adalah ${hariIni}.${contextData}
 
 Output HARUS berupa JSON valid tanpa teks tambahan di luar JSON. Format skema:
 {
@@ -89,14 +148,14 @@ Aturan Ketat Parsing:
    - PayLater -> pocket: "oprasional_bersama", category: "makanan_minuman" atau sesuai, subtype: "paylater_payment"`;
 };
 
-export async function parseWithGroq(text: string): Promise<ParsedTransaction | null> {
+export async function parseWithGroq(text: string, dbSnapshot?: DatabaseStateSnapshot): Promise<ParsedTransaction | null> {
     if (!groqClient || !GROQ_API_KEY) return null;
     try {
         const response = await groqClient.chat.completions.create({
             model: GROQ_MODEL,
             temperature: 0,
             messages: [
-                { role: 'system', content: getSystemInstruction() },
+                { role: 'system', content: getSystemInstruction(dbSnapshot) },
                 { role: 'user', content: text }
             ],
             response_format: { type: 'json_object' },
@@ -112,7 +171,7 @@ export async function parseWithGroq(text: string): Promise<ParsedTransaction | n
     }
 }
 
-export async function parseWithGemini(text: string): Promise<ParsedTransaction | null> {
+export async function parseWithGemini(text: string, dbSnapshot?: DatabaseStateSnapshot): Promise<ParsedTransaction | null> {
     if (!genAI || !GEMINI_API_KEY) return null;
     try {
         const model = genAI.getGenerativeModel({
@@ -123,7 +182,7 @@ export async function parseWithGemini(text: string): Promise<ParsedTransaction |
             }
         });
 
-        const prompt = `${getSystemInstruction()}\n\nParse teks transaksi berikut:\n"${text}"`;
+        const prompt = `${getSystemInstruction(dbSnapshot)}\n\nParse teks transaksi berikut:\n"${text}"`;
         const result = await model.generateContent(prompt);
         const jsonText = result.response.text();
         if (!jsonText) return null;
@@ -136,16 +195,46 @@ export async function parseWithGemini(text: string): Promise<ParsedTransaction |
     }
 }
 
+// Main parsing function with automatic database state injection
 export async function parseFinancialText(text: string): Promise<ParsedTransaction | null> {
+    // Fetch lean database state snapshot for context injection
+    const dbSnapshot = await fetchDatabaseStateSnapshot();
+    
     if (groqAvailable) {
-        const result = await parseWithGroq(text);
+        const result = await parseWithGroq(text, dbSnapshot);
         if (result && result.amount > 0) return result;
     }
     if (geminiAvailable) {
-        const result = await parseWithGemini(text);
+        const result = await parseWithGemini(text, dbSnapshot);
         if (result && result.amount > 0) return result;
     }
     return null;
+}
+
+// Dedicated function for informational queries (balance checks, summaries) - uses DB context for accurate responses
+export async function queryWithAIContext(userMessage: string, userName: string): Promise<string> {
+    const dbSnapshot = await fetchDatabaseStateSnapshot();
+    
+    if (groqClient && groqAvailable) {
+        try {
+            const response = await groqClient.chat.completions.create({
+                model: GROQ_MODEL,
+                temperature: 0.5,
+                messages: [
+                    { 
+                        role: 'system', 
+                        content: `Kamu adalah Moni, asisten keuangan keluarga yang profesional, informatif, dan friendly. Panggil user "${userName}" atau "Kak". Bahasa Indonesia yang baik, jelas, dan to the point. JANGAN gunakan kata "gue", "lo", "cuy". Singkat 1-2 kalimat. Gunakan DATA KEUANGAN REAL-TIME berikut untuk memberikan jawaban yang akurat:\n${dbSnapshot ? `\n📊 DATA KEUANGAN:\n💼 Kantong: ${dbSnapshot.pockets.map(p => `${p.display_name || p.name}: Rp ${Number(p.current_balance).toLocaleString('id-ID')}`).join(', ')}\n🏦 Aset: ${dbSnapshot.assets.map(a => `${a.name}: ${a.category?.includes('emas') || a.category?.includes('gold') ? `${a.gold_weight_gram || 0} gram` : `Rp ${Number(a.balance).toLocaleString('id-ID')}`}`).join(', ')}` : ''}`
+                    },
+                    { role: 'user', content: userMessage }
+                ],
+                max_tokens: 150,
+            });
+            return response.choices[0]?.message?.content || 'Siap, Kak! 🚀';
+        } catch {
+            // Fallback to simple response
+        }
+    }
+    return 'Siap, Kak! 🚀';
 }
 
 // OPTIMASI PARSER GAMBAR (GEMINI VISION) - MENDUKUNG STRUK STRUK NON-PEMBELIAN (TAGIHAN & PAYLATER)
