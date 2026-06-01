@@ -44,7 +44,7 @@ let groqAvailable = GROQ_API_KEY ? true : false;
 let geminiAvailable = GEMINI_API_KEY ? true : false;
 
 // Fetch lean database state snapshot for LLM context
-async function fetchDatabaseStateSnapshot(): Promise<DatabaseStateSnapshot | null> {
+async function fetchDatabaseStateSnapshot(): Promise<DatabaseStateSnapshot | undefined> {
     try {
         const [pocketsResult, assetsResult, billsResult, installmentsResult] = await Promise.all([
             supabase.from('pockets').select('id, name, display_name, current_balance, ownership'),
@@ -64,7 +64,7 @@ async function fetchDatabaseStateSnapshot(): Promise<DatabaseStateSnapshot | nul
         };
     } catch (error) {
         console.error('❌ Failed to fetch database state snapshot:', error);
-        return null;
+        return undefined; // 📌 FIX: Kembalikan undefined saat catch error agar aman
     }
 }
 

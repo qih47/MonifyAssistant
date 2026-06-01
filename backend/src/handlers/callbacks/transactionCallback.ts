@@ -8,24 +8,25 @@ import { getPocketIcon } from '../../helpers/iconMapper.js';
 import { formatPocketName, formatIDR } from '../../helpers/formatters.js';
 import { pendingTransactions } from '../../state/pendingTransactions.js';
 
+
 export async function handleTransactionCallback(ctx: any, callbackData: string) {
     await ctx.answerCbQuery('⏳ Memproses...');
     const parts = callbackData.split(':');
     const txId = parts[1];
     const selectedPocketId = parts[2];
 
-    const txData = pendingTransactions.get(txId);
+    const txData = pendingTransactions.get(txId) as any;
     if (!txData) { await ctx.answerCbQuery('❌ Data expired.'); return; }
 
     // CRITICAL FIX: Ensure actor is always valid before proceeding
     let { amount, actor, description, type, category, merchant, transaction_date } = txData;
-    
+
     // Validate and fix actor if missing or invalid
     if (!actor || actor === 'auto' || (actor !== 'suami' && actor !== 'istri')) {
         actor = ctx.state.actor || 'suami'; // Fallback to session actor or default
         console.log(`⚠️ Fixed invalid actor '${txData.actor}' to '${actor}' for tx ${txId}`);
     }
-    
+
     pendingTransactions.delete(txId);
 
     try {
@@ -56,9 +57,9 @@ export async function handleTransactionCallback(ctx: any, callbackData: string) 
         if (linkedAssetId) {
             const assetData = await getAssetById(linkedAssetId);
             if (assetData) {
-                const isGoldAsset = assetData.category?.includes('emas') || assetData.category?.includes('gold') || 
-                                   assetData.name.toLowerCase().includes('emas') || assetData.name.toLowerCase().includes('logam mulia');
-                
+                const isGoldAsset = assetData.category?.includes('emas') || assetData.category?.includes('gold') ||
+                    assetData.name.toLowerCase().includes('emas') || assetData.name.toLowerCase().includes('logam mulia');
+
                 if (isGoldAsset && assetData.gold_weight_gram) {
                     // For gold assets, adjust weight instead of balance
                     // Convert amount to grams (using Rp 1.450.000/gram buyback rate)
@@ -86,7 +87,7 @@ export async function handleTransactionCallback(ctx: any, callbackData: string) 
                     .from('bills')
                     .select('*')
                     .eq('status', 'unpaid');
-                
+
                 if (bills && bills.length > 0) {
                     const matchedBill = bills.find(b => b.name.toLowerCase().includes(entityName.toLowerCase()));
                     if (matchedBill) {
@@ -107,7 +108,7 @@ export async function handleTransactionCallback(ctx: any, callbackData: string) 
                 const { data: installments } = await supabase
                     .from('installments')
                     .select('*');
-                
+
                 if (installments && installments.length > 0) {
                     const activeInstallments = installments.filter(i => Number(i.tenor_months) > Number(i.paid_months));
                     const matchedInstallment = activeInstallments.find(i => i.name.toLowerCase().includes(entityName.toLowerCase()));
@@ -156,16 +157,16 @@ export async function handleTransactionCallback(ctx: any, callbackData: string) 
 // Helper function extracted from receiptAnalyzer for standalone use
 function extractEntityName(description: string, receiptType: string): string | null {
     const desc = description.toLowerCase();
-    
+
     switch (receiptType) {
         case 'bill':
             const billMatch = desc.match(/(listrik|wifi|pln|internet|air|gas|token|kosan|kosan wifi)/i);
             return billMatch ? billMatch[1] : null;
-            
+
         case 'installment':
             const instMatch = desc.match(/(?:cicil|bayar)\s+([a-zA-Z\s]+?)(?:\d+|$)/i);
             return instMatch ? instMatch[1].trim() : null;
-            
+
         default:
             return null;
     }

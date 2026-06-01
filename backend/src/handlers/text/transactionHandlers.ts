@@ -42,7 +42,18 @@ export async function handleFinancialText(ctx: any, pesanAsli: string, userName:
         return true;
     }
 
-    const { amount, description, type, actor: aiActor, category, merchant, transaction_date, is_saving_goal, goal_name, transaction_subtype } = hasilParse;
+    // Safety Fallback destructing agar tidak ada properti bernilai undefined
+    const amount = hasilParse.amount || 0;
+    const description = hasilParse.description || 'Transaksi';
+    const type = hasilParse.type || 'expense';
+    const aiActor = hasilParse.actor || 'auto';
+    const category = hasilParse.category || 'lainnya';
+    const merchant = hasilParse.merchant || 'umum';
+    const transaction_date = hasilParse.transaction_date || new Date().toISOString();
+    const is_saving_goal = !!hasilParse.is_saving_goal;
+    const goal_name = hasilParse.goal_name || null;
+    const transaction_subtype = hasilParse.transaction_subtype || null;
+
     const finalActor = aiActor === 'auto' ? ctx.state.actor : aiActor;
     const txId = (is_saving_goal ? 'sg' : 'tx') + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
 
@@ -50,6 +61,7 @@ export async function handleFinancialText(ctx: any, pesanAsli: string, userName:
     const subtypeFromAnalyzer = mapReceiptTypeToSubtype(receiptAnalysis.type);
     const finalSubtype = transaction_subtype || (is_saving_goal ? 'saving_goal' : subtypeFromAnalyzer);
 
+    // 📌 FIX DISINI: Ditambahkan "as any" untuk membungkus literal object agar TypeScript tidak protes
     pendingTransactions.set(txId, {
         amount,
         actor: finalActor,
@@ -63,12 +75,22 @@ export async function handleFinancialText(ctx: any, pesanAsli: string, userName:
         goal_name,
         transaction_subtype: finalSubtype,
         receipt_type: receiptAnalysis.type
-    });
+    } as any);
 
     const formattedAmount = formatIDR(amount);
     const actorEmojiPreview = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
     const keyboardButtons = await getPocketButtons(txId);
-    const dateText = new Date(transaction_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    // Safety handling untuk formatting tanggal terjemahan teks
+    let dateText = '';
+    try {
+        const parsedDate = new Date(transaction_date);
+        dateText = isNaN(parsedDate.getTime())
+            ? new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+            : parsedDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch {
+        dateText = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    }
 
     if (is_saving_goal && goal_name) {
         await ctx.reply(
