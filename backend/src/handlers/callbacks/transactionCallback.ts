@@ -17,7 +17,15 @@ export async function handleTransactionCallback(ctx: any, callbackData: string) 
     const txData = pendingTransactions.get(txId);
     if (!txData) { await ctx.answerCbQuery('❌ Data expired.'); return; }
 
-    const { amount, actor, description, type, category, merchant, transaction_date } = txData;
+    // CRITICAL FIX: Ensure actor is always valid before proceeding
+    let { amount, actor, description, type, category, merchant, transaction_date } = txData;
+    
+    // Validate and fix actor if missing or invalid
+    if (!actor || actor === 'auto' || (actor !== 'suami' && actor !== 'istri')) {
+        actor = ctx.state.actor || 'suami'; // Fallback to session actor or default
+        console.log(`⚠️ Fixed invalid actor '${txData.actor}' to '${actor}' for tx ${txId}`);
+    }
+    
     pendingTransactions.delete(txId);
 
     try {
