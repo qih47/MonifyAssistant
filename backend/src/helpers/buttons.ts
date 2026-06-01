@@ -5,7 +5,7 @@ import { pendingTransactions } from '../state/pendingTransactions.js';
 
 export async function getPocketButtons(txId: string): Promise<Array<Array<{ text: string; callback_data: string }>>> {
     try {
-        const { data: pockets } = await supabase.from('pockets').select('name, ownership').order('name');
+        const { data: pockets } = await supabase.from('pockets').select('id, name, display_name, ownership').order('name');
         const txData = pendingTransactions.get(txId);
 
         // Pilih callback prefix secara dinamis: 'sg' untuk saving goals, 'p' untuk transaksi normal
@@ -13,9 +13,7 @@ export async function getPocketButtons(txId: string): Promise<Array<Array<{ text
 
         if (!pockets || pockets.length === 0) {
             return [
-                [{ text: '🌐 Operasional Utama', callback_data: `p:${txId}:operasional_utama` }],
-                [{ text: '🧑 Jajan Qisthi', callback_data: `p:${txId}:jajan_qisthi` }],
-                [{ text: '👩 Jajan Gita', callback_data: `p:${txId}:jajan_gita` }],
+                [{ text: '🌐 Operasional Utama', callback_data: `${prefix}:${txId}:1` }], // Default id 1
                 [{ text: '❌ Batal', callback_data: `cancel:${txId}` }]
             ];
         }
@@ -24,9 +22,10 @@ export async function getPocketButtons(txId: string): Promise<Array<Array<{ text
         let currentRow: Array<{ text: string; callback_data: string }> = [];
 
         pockets.forEach((p, index) => {
-            const icon = getPocketIcon(p.ownership);
-            const cleanName = formatPocketName(p.name);
-            currentRow.push({ text: `${icon} ${cleanName}`, callback_data: `${prefix}:${txId}:${p.name}` });
+            const icon = getPocketIcon(p.ownership, p.name);
+            const cleanName = p.display_name || formatPocketName(p.name);
+            // Use ID instead of Name in callback_data
+            currentRow.push({ text: `${icon} ${cleanName}`, callback_data: `${prefix}:${txId}:${p.id}` });
 
             if (currentRow.length === 2 || index === pockets.length - 1) {
                 buttons.push([...currentRow]);

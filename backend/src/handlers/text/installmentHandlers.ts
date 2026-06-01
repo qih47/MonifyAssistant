@@ -1,5 +1,6 @@
 import { supabase } from '../../config/supabaseClient.js';
-import { formatIDR } from '../../helpers/formatters.js';
+import { formatIDR, formatPocketName } from '../../helpers/formatters.js';
+import { getPocketIcon } from '../../helpers/iconMapper.js';
 
 export async function handleListCicilan(ctx: any) {
     try {
@@ -75,6 +76,32 @@ export async function handleBayarCicilan(ctx: any, namaCicilan: string) {
         const encodedName = encodeURIComponent(installment.name);
         const progressPct = Math.round((Number(installment.paid_months) / Number(installment.tenor_months)) * 100);
 
+        const { data: pockets } = await supabase
+            .from('pockets')
+            .select('id, name, display_name, ownership')
+            .order('name');
+
+        const inline_keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+        if (pockets && pockets.length > 0) {
+            let currentRow: Array<{ text: string; callback_data: string }> = [];
+            pockets.forEach((p, index) => {
+                const icon = getPocketIcon(p.ownership, p.name);
+                const cleanName = p.display_name || formatPocketName(p.name);
+                currentRow.push({
+                    text: `${icon} ${cleanName}`,
+                    callback_data: `payinstall:${amount}:${actor}:${p.id}:${encodedName}:${installment.id}`
+                });
+                
+                if (currentRow.length === 2 || index === pockets.length - 1) {
+                    inline_keyboard.push([...currentRow]);
+                    currentRow = [];
+                }
+            });
+        } else {
+            inline_keyboard.push([{ text: '🌐 Kantong Bersama', callback_data: `payinstall:${amount}:${actor}:1:${encodedName}:${installment.id}` }]);
+        }
+        inline_keyboard.push([{ text: '❌ Batal', callback_data: 'cancel_install' }]);
+
         await ctx.reply(
             '━━━━━━━━━━━━━━━━━━━\n🏠 *KONFIRMASI BAYAR CICILAN*\n━━━━━━━━━━━━━━━━━━━\n\n' +
             `📝 *${installment.name}*\n` +
@@ -85,12 +112,7 @@ export async function handleBayarCicilan(ctx: any, namaCicilan: string) {
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🌐 Kantong Bersama', callback_data: `payinstall:${amount}:${actor}:operasional_utama:${encodedName}:${installment.id}` }],
-                        [{ text: '🧑 Jajan Qisthi', callback_data: `payinstall:${amount}:${actor}:jajan_qisthi:${encodedName}:${installment.id}` }],
-                        [{ text: '👩 Jajan Gita', callback_data: `payinstall:${amount}:${actor}:jajan_gita:${encodedName}:${installment.id}` }],
-                        [{ text: '❌ Batal', callback_data: `cancel_install` }]
-                    ]
+                    inline_keyboard
                 }
             }
         );

@@ -1,5 +1,6 @@
 import { supabase } from '../../config/supabaseClient.js';
 import { formatIDR, formatPocketName } from '../../helpers/formatters.js';
+import { getPocketIcon } from '../../helpers/iconMapper.js';
 import { sendTransactionEmailNotification } from '../../services/notificationService.js';
 import { checkAndNotifyLowFund } from '../../services/lowFundService.js';
 
@@ -63,6 +64,32 @@ export async function handleBayarTagihan(ctx: any, namaTagihan: string) {
         const encodedName = encodeURIComponent(bill.name);
         const dueDate = bill.due_date ? new Date(bill.due_date * 1000).toLocaleDateString('id-ID', { day: 'numeric', month: 'long' }) : 'Tidak diketahui';
 
+        const { data: pockets } = await supabase
+            .from('pockets')
+            .select('id, name, display_name, ownership')
+            .order('name');
+
+        const inline_keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+        if (pockets && pockets.length > 0) {
+            let currentRow: Array<{ text: string; callback_data: string }> = [];
+            pockets.forEach((p, index) => {
+                const icon = getPocketIcon(p.ownership, p.name);
+                const cleanName = p.display_name || formatPocketName(p.name);
+                currentRow.push({
+                    text: `${icon} ${cleanName}`,
+                    callback_data: `paybill:${amount}:${actor}:${p.id}:${encodedName}:${bill.id}`
+                });
+                
+                if (currentRow.length === 2 || index === pockets.length - 1) {
+                    inline_keyboard.push([...currentRow]);
+                    currentRow = [];
+                }
+            });
+        } else {
+            inline_keyboard.push([{ text: '🌐 Kantong Bersama', callback_data: `paybill:${amount}:${actor}:1:${encodedName}:${bill.id}` }]);
+        }
+        inline_keyboard.push([{ text: '❌ Batal', callback_data: 'cancel_bill' }]);
+
         await ctx.reply(
             '━━━━━━━━━━━━━━━━━━━\n🧾 *KONFIRMASI BAYAR TAGIHAN*\n━━━━━━━━━━━━━━━━━━━\n\n' +
             `📝 *${bill.name}*\n` +
@@ -73,12 +100,7 @@ export async function handleBayarTagihan(ctx: any, namaTagihan: string) {
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🌐 Kantong Bersama', callback_data: `paybill:${amount}:${actor}:operasional_utama:${encodedName}:${bill.id}` }],
-                        [{ text: '🧑 Jajan Qisthi', callback_data: `paybill:${amount}:${actor}:jajan_qisthi:${encodedName}:${bill.id}` }],
-                        [{ text: '👩 Jajan Gita', callback_data: `paybill:${amount}:${actor}:jajan_gita:${encodedName}:${bill.id}` }],
-                        [{ text: '❌ Batal', callback_data: `cancel_bill` }]
-                    ]
+                    inline_keyboard
                 }
             }
         );

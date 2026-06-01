@@ -1696,30 +1696,784 @@ Sistem antarmuka web Monify dirancang dengan standar keindahan visual yang tingg
 
 ---
 
-## 🧩 Backend Refactor — Module Structure
+## 🧩 Backend Modular Architecture — Complete Structure & Development Guide
 
-Ringkasan:
+### Ringkasan Arsitektur
 
-Setelah refaktor, `backend/src/` diorganisir untuk memisah tanggung jawab dan memudahkan pengembangan:
+Setelah refactor, `backend/src/` diorganisir dengan **modular architecture** yang memisahkan tanggung jawab dan memudahkan penambahan fitur baru:
 
 ```
 backend/src/
-├── index.ts                # Clean entry point, inisialisasi server & webhook
-├── bot/                    # Bot wiring: init, middleware, commands
-│   ├── init.ts
-│   └── middleware.ts
-├── handlers/               # Semua handler: text, callbacks, photo
-├── helpers/                # Utility murni: formatters, buttons, naturalResponse
-├── services/               # Business logic: transaction, pocket, asset, lowFund
-├── state/                  # Transient state (pendingTransactions)
-└── constants/              # Shared constants (keywords)
+├── index.ts                      # 🔥 Entry point: Express server, Telegram webhook/long polling
+│
+├── config/
+│   └── supabaseClient.ts        # Supabase DB client initialization
+│
+├── bot/                          # 🤖 Bot Framework & Wiring Layer
+│   ├── init.ts                  # Main bot initialization & handler registration
+│   ├── middleware.ts            # Auth middleware (verify allowed users)
+│   ├── commands.ts              # Command registration (/saldo, /bayar, /cicil, /laporan)
+│   ├── handlers.ts              # Register text & photo message handlers
+│   └── callbacks.ts             # Register callback query (inline button) handlers
+│
+├── handlers/                     # 📬 Message & Callback Handlers (Feature-Specific)
+│   ├── text/                    # Text message handlers (dispatch by intent)
+│   │   ├── messageHandlers.ts   # Main dispatcher: route text to appropriate handler
+│   │   ├── transactionHandlers.ts # Financial transaction parsing & confirmation
+│   │   ├── billHandlers.ts       # Bill listing & payment flow
+│   │   ├── installmentHandlers.ts # Installment payment flow
+│   │   ├── balanceHandlers.ts   # Check balance handler
+│   │   ├── reportHandlers.ts    # Report & export handlers
+│   │   ├── savingGoalHandlers.ts # Saving goal tracking
+│   │   ├── assetHandlers.ts     # Asset transfer handlers
+│   │   └── commandHandlers.ts   # (Legacy, mostly consolidated)
+│   │
+│   ├── photo/
+│   │   ├── receiptHandler.ts    # OCR receipt scanning & transaction parsing
+│   │   └── photoHandlers.ts     # (Legacy)
+│   │
+│   └── callbacks/               # Inline button callback handlers (by prefix)
+│       ├── callbackHandlers.ts  # Main dispatcher: route by callback data prefix
+│       ├── transactionCallback.ts   # p: prefix - transaction confirmation
+│       ├── assetTransferCallback.ts # tfa: prefix - asset transfer confirmation
+│       ├── savingGoalCallback.ts    # sg: prefix - saving goal confirmation
+│       ├── billPaymentCallback.ts   # paybill: prefix - bill payment
+│       ├── installmentCallback.ts   # payinstall: prefix - installment payment
+│       └── cancelCallback.ts        # cancel: prefix - cancel pending transaction
+│
+├── services/                    # 🧠 Business Logic & External Services
+│   ├── aiService.ts            # AI parsing (Groq + Gemini) with fallback
+│   ├── parsers.ts              # Manual transaction parsing (fallback)
+│   ├── transactionService.ts   # Transaction CRUD operations
+│   ├── pocketService.ts        # Pocket balance management
+│   ├── assetService.ts         # Asset management
+│   ├── cronService.ts          # Scheduled jobs (bill reminders, etc)
+│   ├── notificationService.ts  # Email notifications
+│   └── lowFundService.ts       # Low fund alerts
+│
+├── helpers/                     # 🛠️ Pure Utility Functions (No Side Effects)
+│   ├── validators.ts           # Keyword matching, transaction detection
+│   ├── formatters.ts           # Currency, number formatting (IDR)
+│   ├── buttons.ts              # Inline keyboard generation
+│   ├── naturalResponse.ts      # AI-generated natural responses
+│   └── iconMapper.ts           # Emoji/icon mapping
+│
+├── constants/                   # 📋 Shared Constants
+│   └── keywords.ts             # Keyword lists for intent matching
+│
+└── state/                       # 💾 Transient State (Session-like)
+    └── pendingTransactions.ts  # In-memory Map: pending transaction storage
 ```
 
-Perubahan praktis:
+---
 
-- Middleware & handler registrations dipindah ke `bot/init.ts`.
-- Semua handler teks dan callback dipisah ke `handlers/*`.
-- Helpers dan constants dikonsolidasikan.
+### Module Responsibilities Breakdown
+
+#### 1. **bot/** - Bot Framework & Initialization Layer
+
+**Purpose**: Coordinate bot setup, middleware, and handler registration.
+
+**Files**:
+
+- **`init.ts`**: Main entry point. Calls `registerBotHandlers()`, `registerCallbackHandlers()`, `registerTextCommands()` in sequence.
+
+  ```typescript
+  export function initBot(
+    bot: Telegraf<any>,
+    allowedChatIds: string[],
+    allowedUsers: Record<string, string>,
+  ) {
+    bot.use(authMiddleware(allowedChatIds, allowedUsers));
+    registerBotHandlers(bot);
+    registerCallbackHandlers(bot);
+    registerTextCommands(bot);
+  }
+  ```
+
+- **`middleware.ts`**: Auth check - verify user is in `ALLOWED_USERS`.
+- **`commands.ts`**: Register slash commands (`/saldo`, `/bayar`, etc). Each command has simple handler logic or delegates to `handlers/text/*`.
+
+  ```typescript
+  bot.command("saldo", async (ctx) => {
+    await ctx.reply("🔍 Memeriksa saldo...");
+    return await handleCekSaldo(ctx);
+  });
+  ```
+
+- **`handlers.ts`**: Register event listeners for `text` and `photo` messages.
+
+  ```typescript
+  export function registerBotHandlers(bot: Telegraf<any>) {
+    bot.on("text", handleTextMessage);
+    bot.on("photo", handlePhotoMessage);
+  }
+  ```
+
+- **`callbacks.ts`**: Register callback query listener.
+
+  ```typescript
+  export function registerCallbackHandlers(bot: Telegraf<any>) {
+    bot.on("callback_query", handleCallbackQuery);
+  }
+  ```
+
+---
+
+#### 2. **handlers/text/** - Text Message Intent Dispatchers
+
+**Purpose**: Route incoming text messages to feature-specific handlers based on user intent (keywords, AI parsing, etc).
+
+**Main File: `messageHandlers.ts`**
+
+This is the PRIMARY dispatcher. It:
+
+1. Checks if message starts with `/` (skip, handled by `/commands`)
+2. Matches specific keywords (bills, installments, balance, etc)
+3. Falls back to AI financial text parsing if no keyword match
+4. Delegates to specialized handlers
+
+**Flow**:
+
+```
+User Text → handleTextMessage(ctx)
+  ↓
+Check: "/" prefix? → SKIP (handled by bot.command)
+  ↓
+Check: Keyword match ("bayar", "cicil", "saldo", etc)?
+  → YES → Call specific handler (handleBayarTagihan, handleListCicilan, etc)
+  ↓ NO
+Try AI parse: parseFinancialText() → Groq or Gemini
+  → Success → Show confirmation UI with inline buttons
+  ↓ Fail
+Fallback: Manual parse with regex patterns
+  → Success → Show confirmation UI
+  ↓ Fail
+Return: "🤔 Moni tidak mengerti" message
+```
+
+**Code Pattern**:
+
+```typescript
+export async function handleTextMessage(ctx: any) {
+    const pesanAsli = ctx.message.text;
+    const pesan = pesanAsli.toLowerCase().trim();
+    const userName = ctx.state.actor === 'suami' ? 'Qisthi' : 'Gita';
+
+    // Check specific intents in order of priority
+    if (pesan === 'bayar' || ...) return await handleListTagihan(ctx);
+    if (pesan.startsWith('bayar ')) return await handleBayarTagihan(ctx, ...);
+
+    // Keywords with helper function
+    if (matchesAnyKeyword(pesan, saldoKeywords)) {
+        return await handleCekSaldo(ctx);
+    }
+
+    // Financial transaction (highest effort)
+    if (await handleFinancialText(ctx, pesanAsli, userName)) return;
+
+    // Fallback to natural response
+    const reply = await generateNaturalResponse(`User berkata: "${pesanAsli}"`, userName);
+    return await ctx.reply(reply);
+}
+```
+
+**Other Text Handlers**:
+
+- **`transactionHandlers.ts`**: Handles financial transaction flow (parsing, confirmation, pocket selection)
+- **`billHandlers.ts`**: List & pay bills
+- **`installmentHandlers.ts`**: List & pay installments
+- **`balanceHandlers.ts`**: Check all pocket balances
+- **`reportHandlers.ts`**: Export CSV report
+- **`savingGoalHandlers.ts`**: Show saving goal progress
+- **`assetHandlers.ts`**: Asset transfer flows
+
+---
+
+#### 3. **handlers/callbacks/** - Callback Query Dispatchers (Inline Button Handlers)
+
+**Purpose**: Handle user clicks on inline buttons. Route based on `callback_data` prefix.
+
+**Main File: `callbackHandlers.ts`**
+
+```typescript
+export async function handleCallbackQuery(ctx: any) {
+    const callbackData = ctx.callbackQuery?.data;
+    if (!callbackData) return;
+
+    // Route by prefix
+    if (callbackData.startsWith('p:'))
+        return await handleTransactionCallback(ctx, callbackData);
+    if (callbackData.startsWith('tfa:'))
+        return await handleAssetTransferCallback(ctx, callbackData);
+    if (callbackData.startsWith('sg:'))
+        return await handleSavingGoalCallback(ctx, callbackData);
+    if (callbackData.startsWith('paybill:'))
+        return await handleBillPaymentCallback(ctx, callbackData);
+    if (callbackData.startsWith('payinstall:'))
+        return await handleInstallmentCallback(ctx, callbackData);
+    if (callbackData.startsWith('cancel:') || callbackData === 'cancel_bill' || ...)
+        return await handleCancelCallback(ctx, callbackData);
+}
+```
+
+**Callback Files** (each handles one flow):
+
+- **`transactionCallback.ts`**: `p:` prefix - pocket selection & transaction confirmation
+- **`assetTransferCallback.ts`**: `tfa:` prefix - asset transfer confirmation
+- **`savingGoalCallback.ts`**: `sg:` prefix - saving goal pocket selection
+- **`billPaymentCallback.ts`**: `paybill:` prefix - pay bill confirmation
+- **`installmentCallback.ts`**: `payinstall:` prefix - pay installment confirmation
+- **`cancelCallback.ts`**: `cancel:` prefix - cancel pending transaction
+
+**Pattern for Each Callback Handler**:
+
+```typescript
+export async function handleTransactionCallback(
+  ctx: any,
+  callbackData: string,
+) {
+  // Callback data format: "p:<txId>:<pocketId>"
+  const [, txId, pocketId] = callbackData.split(":");
+
+  // Fetch pending transaction from state
+  const pendingTx = pendingTransactions.get(txId);
+  if (!pendingTx) {
+    return await ctx.reply("⚠️ Transaksi sudah expired. Coba lagi.");
+  }
+
+  // Execute transaction: update pocket, asset, insert transaction record
+  await supabase
+    .from("pockets")
+    .update({ current_balance: Number(pendingTx.balance) - pendingTx.amount })
+    .eq("id", pocketId);
+
+  // ... more DB operations ...
+
+  // Clean up
+  pendingTransactions.delete(txId);
+
+  // Acknowledge callback & show result
+  await ctx.answerCbQuery("✅ Transaksi berhasil!");
+  await ctx.editMessageText("✅ Berhasil dicatat");
+}
+```
+
+---
+
+#### 4. **services/** - Business Logic & Data Operations
+
+**Purpose**: Encapsulate domain logic (transactions, pockets, AI parsing, notifications). Services are called by handlers and can call other services.
+
+**Key Services**:
+
+- **`aiService.ts`**: Parse text/image using Groq LLM (primary) + fallback to Gemini 2.5 Flash. Returns structured ParsedTransaction object.
+
+  ```typescript
+  export async function parseFinancialText(text: string): Promise<ParsedTransaction | null> {
+      try {
+          // Try Groq first (faster, free)
+          const result = await groq.chat.completions.create({...});
+          return JSON.parse(result.choices[0].message.content);
+      } catch (groqError) {
+          // Fallback to Gemini
+          const geminiResult = await genAI.getGenerativeModel({...}).generateContent(...);
+          return JSON.parse(geminiResult.response.text());
+      }
+  }
+  ```
+
+- **`transactionService.ts`**: CRUD for transactions
+
+  ```typescript
+  export async function createTransaction(txData: TransactionInput) {
+    return await supabase.from("transactions").insert([txData]);
+  }
+  ```
+
+- **`pocketService.ts`**: Update pocket balances
+
+  ```typescript
+  export async function updatePocketBalance(pocketId: number, delta: number) {
+    const { data: pocket } = await supabase
+      .from("pockets")
+      .select("current_balance")
+      .eq("id", pocketId)
+      .single();
+
+    return await supabase
+      .from("pockets")
+      .update({ current_balance: Number(pocket.current_balance) + delta })
+      .eq("id", pocketId);
+  }
+  ```
+
+- **`cronService.ts`**: Scheduled background jobs (bill reminders, report generation)
+
+  ```typescript
+  export function startCronJobs() {
+    schedule.scheduleJob("0 7,14 * * *", () => checkDueBills());
+    schedule.scheduleJob("0 9 1 * *", () => generateMonthlyReport());
+  }
+  ```
+
+- **`notificationService.ts`**: Send emails & Telegram notifications
+
+  ```typescript
+  export async function sendTransactionEmailNotification(txData: Transaction) {
+    await nodemailer.transporter.sendMail({
+      to: "qisthi@gmail.com",
+      subject: `Transaksi: ${txData.description}`,
+      html: renderEmailTemplate(txData),
+    });
+  }
+  ```
+
+---
+
+#### 5. **helpers/** - Pure Utility Functions
+
+**Purpose**: Reusable, side-effect-free helper functions. No DB access, no API calls (except in special cases).
+
+**Key Helpers**:
+
+- **`validators.ts`**: Check keywords, detect transaction intent
+
+  ```typescript
+  export function matchesAnyKeyword(text: string, keywords: string[]) {
+    return keywords.some((k) => text.includes(k));
+  }
+
+  export function isPotentialTransaction(text: string) {
+    return hasTransactionAmount(text) && hasTransactionIntent(text);
+  }
+  ```
+
+- **`formatters.ts`**: Format currency, dates
+
+  ```typescript
+  export function formatIDR(amount: number): string {
+    return new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
+      minimumFractionDigits: 0,
+    }).format(amount);
+  }
+  ```
+
+- **`buttons.ts`**: Generate Telegram inline keyboard markup
+
+  ```typescript
+  export async function getPocketButtons(txId: string) {
+    const { data: pockets } = await supabase
+      .from("pockets")
+      .select("id, display_name");
+    return pockets.map((p) => [
+      {
+        text: p.display_name,
+        callback_data: `p:${txId}:${p.id}`,
+      },
+    ]);
+  }
+  ```
+
+- **`naturalResponse.ts`**: Generate AI-powered natural language responses
+
+  ```typescript
+  export async function generateNaturalResponse(
+    prompt: string,
+    userName: string,
+  ) {
+    const result = await gemini.generateContent(
+      `${prompt}\nRespond as "${userName}" character...`,
+    );
+    return result.response.text();
+  }
+  ```
+
+---
+
+#### 6. **constants/** - Shared Configuration
+
+**Purpose**: Centralized keyword lists, status enums, and constants used across handlers.
+
+**Example**:
+
+```typescript
+// constants/keywords.ts
+export const laporanKeywords = ['laporan', 'export', 'csv', 'download', ...];
+export const saldoKeywords = ['cek saldo', 'saldo', 'lihat saldo', ...];
+export const helpKeywords = ['help', 'bantuan', 'fitur', ...];
+// ... more keywords
+```
+
+**Usage in handlers**:
+
+```typescript
+import { saldoKeywords } from "../../constants/keywords.js";
+
+if (matchesAnyKeyword(pesan, saldoKeywords)) {
+  return await handleCekSaldo(ctx);
+}
+```
+
+---
+
+#### 7. **state/** - Transient Session State
+
+**Purpose**: In-memory storage for temporary data (e.g., pending transactions waiting for user confirmation).
+
+**File: `pendingTransactions.ts`**
+
+```typescript
+// Use Map for fast lookup & cleanup
+export const pendingTransactions = new Map<string, PendingTransaction>();
+
+// Format: txId → transaction object
+// txId = (is_saving_goal ? 'sg' : 'tx') + Date.now().toString(36) + random
+
+interface PendingTransaction {
+  amount: number;
+  actor: "suami" | "istri";
+  description: string;
+  type: "income" | "expense" | "transfer";
+  timestamp: number;
+  category: string;
+  merchant: string;
+  transaction_date: string;
+  is_saving_goal: boolean;
+  goal_name?: string;
+}
+```
+
+**Why Map instead of DB?** Pending transactions are short-lived (user confirms within minutes or it expires). Storing in DB would pollute transaction history.
+
+---
+
+### 🎓 How to Add a New Text Handler
+
+**Scenario**: You want to add a new feature "Check debt status" when user types "cek hutang".
+
+#### Step 1: Add Keyword to `constants/keywords.ts`
+
+```typescript
+// constants/keywords.ts
+export const debtKeywords = [
+  "cek hutang",
+  "daftar hutang",
+  "list hutang",
+  "hutang berapa",
+];
+```
+
+#### Step 2: Create Feature Handler File `handlers/text/debtHandlers.ts`
+
+```typescript
+// handlers/text/debtHandlers.ts
+import { supabase } from "../../config/supabaseClient.js";
+import { formatIDR } from "../../helpers/formatters.js";
+
+export async function handleCheckDebt(ctx: any) {
+  try {
+    // Fetch debts from database
+    const { data: debts, error } = await supabase
+      .from("debts")
+      .select("*")
+      .eq("status", "active")
+      .order("end_date", { ascending: true });
+
+    if (error) throw error;
+    if (!debts || debts.length === 0) {
+      return await ctx.reply("✅ Alhamdulillah, tidak ada hutang saat ini!");
+    }
+
+    let responseText = `━━━━━━━━━━━━━━━━━\n💳 *DAFTAR HUTANG AKTIF*\n━━━━━━━━━━━━━━━━━\n\n`;
+
+    debts.forEach((debt: any, idx: number) => {
+      const remaining = Number(debt.remaining_balance);
+      const total = Number(debt.principal_amount);
+      const pct = Math.round((remaining / total) * 100);
+
+      responseText += `${idx + 1}. *${debt.name}*\n`;
+      responseText += `   💰 Sisa: *${formatIDR(remaining)}* / ${formatIDR(total)} (${pct}%)\n`;
+      responseText += `   📅 Jatuh tempo: ${new Date(debt.end_date * 1000).toLocaleDateString("id-ID")}\n\n`;
+    });
+
+    responseText += `━━━━━━━━━━━━━━━━━\n⚠️ Total hutang: *${formatIDR(debts.reduce((sum: number, d: any) => sum + Number(d.remaining_balance), 0))}*`;
+
+    return await ctx.replyWithMarkdown(responseText);
+  } catch (err) {
+    console.error("❌ Gagal cek hutang:", err);
+    return await ctx.reply("⚠️ Gagal mengambil data hutang. Coba lagi nanti.");
+  }
+}
+```
+
+#### Step 3: Import & Add to Dispatcher `handlers/text/messageHandlers.ts`
+
+```typescript
+// handlers/text/messageHandlers.ts
+import { handleCheckDebt } from "./debtHandlers.js";
+import { debtKeywords } from "../../constants/keywords.js";
+
+export async function handleTextMessage(ctx: any) {
+  // ... existing code ...
+
+  // Add your new handler in the appropriate place (after matching by intent)
+  if (matchesAnyKeyword(pesan, debtKeywords)) {
+    return await handleCheckDebt(ctx);
+  }
+
+  // ... rest of function ...
+}
+```
+
+#### Step 4: (Optional) Add Command Alias in `bot/commands.ts`
+
+```typescript
+// bot/commands.ts
+import { handleCheckDebt } from "../handlers/text/debtHandlers.js";
+
+export function registerTextCommands(bot: Telegraf<any>) {
+  // ... existing commands ...
+
+  bot.command("hutang", async (ctx) => {
+    return await handleCheckDebt(ctx);
+  });
+
+  // ... rest of commands ...
+}
+```
+
+#### Step 5: Test
+
+```bash
+# Open Telegram, send messages to bot:
+# "cek hutang"
+# "daftar hutang"
+# "/hutang"
+# All should trigger your new handler
+```
+
+---
+
+### 🎓 How to Add a New Callback Handler
+
+**Scenario**: You want to add a new callback for "Reschedule debt payment" (prefix: `reschedule:`).
+
+#### Step 1: Create Callback Handler File `handlers/callbacks/rescheduleCallback.ts`
+
+```typescript
+// handlers/callbacks/rescheduleCallback.ts
+import { supabase } from "../../config/supabaseClient.js";
+import { formatIDR } from "../../helpers/formatters.js";
+
+export async function handleRescheduleCallback(ctx: any, callbackData: string) {
+  // Callback data format: "reschedule:<debtId>:<newDate>"
+  const [, debtId, newDate] = callbackData.split(":");
+
+  try {
+    // Update debt's end_date
+    await supabase
+      .from("debts")
+      .update({ end_date: BigInt(newDate) })
+      .eq("id", debtId);
+
+    // Show confirmation
+    await ctx.answerCbQuery("✅ Jadwal hutang diubah!");
+    await ctx.editMessageText("✅ Jadwal pembayaran hutang sudah dirubah.");
+
+    // Optional: Send summary
+    const { data: debt } = await supabase
+      .from("debts")
+      .select("*")
+      .eq("id", debtId)
+      .single();
+
+    if (debt) {
+      const newDateStr = new Date(Number(newDate) * 1000).toLocaleDateString(
+        "id-ID",
+      );
+      await ctx.reply(
+        `📅 Hutang "${debt.name}" sekarang jatuh tempo: *${newDateStr}*`,
+        { parse_mode: "Markdown" },
+      );
+    }
+  } catch (err) {
+    console.error("❌ Gagal reschedule hutang:", err);
+    await ctx.answerCbQuery("❌ Gagal mengubah jadwal. Coba lagi.", {
+      show_alert: true,
+    });
+  }
+}
+```
+
+#### Step 2: Add to Main Callback Dispatcher `handlers/callbacks/callbackHandlers.ts`
+
+```typescript
+// handlers/callbacks/callbackHandlers.ts
+import { handleRescheduleCallback } from "./rescheduleCallback.js";
+
+export async function handleCallbackQuery(ctx: any) {
+  const callbackData = ctx.callbackQuery?.data;
+  if (!callbackData) return;
+
+  // Route to your new handler
+  if (callbackData.startsWith("reschedule:")) {
+    return await handleRescheduleCallback(ctx, callbackData);
+  }
+
+  // ... existing handlers ...
+}
+```
+
+#### Step 3: Use in Text Handler with Inline Buttons
+
+```typescript
+// handlers/text/debtHandlers.ts
+export async function handleRescheduleDebtUI(ctx: any) {
+  // Fetch debts
+  const { data: debts } = await supabase
+    .from("debts")
+    .select("*")
+    .eq("status", "active");
+
+  // Create inline buttons for each debt
+  const buttons = debts.map((debt: any) => [
+    {
+      text: `📅 ${debt.name}`,
+      callback_data: `reschedule:${debt.id}:${Math.floor(Date.now() / 1000) + 86400 * 7}`, // +7 days
+    },
+  ]);
+
+  return await ctx.reply("Pilih hutang mana yang ingin dirubah jadwalnya?", {
+    reply_markup: { inline_keyboard: buttons },
+  });
+}
+```
+
+---
+
+### 📋 Best Practices When Adding New Handlers
+
+1. **Always use try-catch** for database operations
+
+   ```typescript
+   try {
+       const { data, error } = await supabase.from(...).select(...);
+       if (error) throw error;
+       // Process data
+   } catch (err) {
+       console.error('❌ Gagal:', err);
+       await ctx.reply('⚠️ Ada error. Coba lagi.');
+   }
+   ```
+
+2. **Reuse keywords** from `constants/keywords.ts` instead of hardcoding
+
+   ```typescript
+   // ✅ Good
+   import { debtKeywords } from '../../constants/keywords.js';
+   if (matchesAnyKeyword(pesan, debtKeywords)) { ... }
+
+   // ❌ Avoid
+   if (pesan.includes('hutang') || pesan.includes('debt')) { ... }
+   ```
+
+3. **Use helper functions** for formatting & UI
+
+   ```typescript
+   // ✅ Good
+   const formatted = formatIDR(amount);
+   const buttons = await getPocketButtons(txId);
+
+   // ❌ Avoid
+   const formatted = `Rp${amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
+   ```
+
+4. **Separate concerns**: Keep handlers lightweight, delegate to services
+
+   ```typescript
+   // ✅ Good
+   export async function handleBillPayment(ctx: any) {
+       const result = await payBill(billId, amount, pocketId); // Service call
+       if (result.success) { await ctx.reply('✅ Berhasil'); }
+   }
+
+   // ❌ Avoid
+   export async function handleBillPayment(ctx: any) {
+       // Complex business logic inline
+       const pocket = await supabase.from('pockets')...
+       const bill = await supabase.from('bills')...
+       // ... 50 lines of logic ...
+   }
+   ```
+
+5. **Use consistent naming**:
+   - Handler functions: `handle<Feature><Action>` (e.g., `handleBillPayment`, `handleCheckDebt`)
+   - Callback prefixes: `<feature>:` (e.g., `paybill:`, `debt:`, `reschedule:`)
+   - Files: `<feature>Handlers.ts` or `<feature>Callback.ts`
+
+6. **Always acknowledge callbacks** to remove loading indicator
+
+   ```typescript
+   await ctx.answerCbQuery("✅ Berhasil!"); // Or with show_alert: true
+   ```
+
+7. **Clean up state** after using pending transactions
+   ```typescript
+   // In callback handler
+   pendingTransactions.delete(txId);
+   ```
+
+---
+
+### 📊 Module Dependency Diagram
+
+```
+index.ts (Entry)
+  ↓
+bot/init.ts (Registration)
+  ├→ bot/middleware.ts
+  ├→ bot/commands.ts → handlers/text/*
+  ├→ bot/handlers.ts → handlers/text/messageHandlers.ts → (other handlers)
+  └→ bot/callbacks.ts → handlers/callbacks/callbackHandlers.ts → (other callbacks)
+
+handlers/text/messageHandlers.ts
+  ├→ helpers/validators.ts (keyword matching)
+  ├→ handlers/text/* (feature-specific)
+  ├→ services/aiService.ts (AI parsing)
+  └→ services/transactionService.ts (DB ops)
+
+handlers/callbacks/*
+  ├→ services/* (DB operations)
+  ├→ helpers/* (formatting, buttons)
+  └→ state/pendingTransactions.ts (cleanup)
+
+services/*
+  ├→ config/supabaseClient.ts (DB access)
+  ├→ helpers/* (formatting, validation)
+  └→ Other services (dependencies)
+
+helpers/*
+  → NO dependencies (pure functions)
+
+constants/*
+  → NO dependencies (data only)
+```
+
+---
+
+### 🎯 Summary: Modular Architecture Benefits
+
+✅ **Scalability**: Add new features without modifying existing code  
+✅ **Maintainability**: Each module has clear, single responsibility  
+✅ **Testability**: Services & helpers can be tested independently  
+✅ **Reusability**: Helpers & services shared across handlers  
+✅ **Clarity**: New developers can quickly understand feature flow  
+✅ **Extensibility**: Document how to add handlers (see above)
+
+---
+
 - Tidak ada perubahan logika bisnis — hanya reorganisasi file.
 
 Build & run (backend):
