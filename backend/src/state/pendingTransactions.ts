@@ -1,4 +1,4 @@
-export type PendingTx = {
+export interface PendingTx {
     amount: number;
     actor: string;
     description: string;
@@ -6,10 +6,14 @@ export type PendingTx = {
     timestamp: number;
     category?: string;
     merchant?: string;
-    transaction_date?: string;
+    transaction_date: string;
     is_saving_goal?: boolean;
     goal_name?: string | null;
-};
+    
+    // 📌 DAFTARKAN DUA BARIS INI BIAR COMPILER TSC ADEM AYEM!
+    transaction_subtype?: string;
+    receipt_type?: string;
+}
 
 export const pendingTransactions = new Map<string, PendingTx>();
 
