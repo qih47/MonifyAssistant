@@ -49,12 +49,16 @@ const ALLOWED_CHAT_IDS = Object.keys(ALLOWED_USERS);
 // COMMAND /start
 // ==========================================
 bot.start((ctx) => {
-    const actorEmoji = ctx.state.actor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
+    // 📌 PERBAIKAN KRITIS: Kunci penentuan aktor secara presisi dari session state middleware
+    // Berikan fallback 'suami' jika inisialisasi state awal Telegram mendeteksi delay/null
+    const finalActor = ctx.state.actor || 'suami';
+    const actorEmojiEmoji = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
+    
     ctx.reply(
         `━━━━━━━━━━━━━━━━━━━\n` +
         `🤖 *Moni - Asisten Keuangan*\n` +
         `━━━━━━━━━━━━━━━━━━━\n\n` +
-        `Halo ${actorEmoji}! 👋\n\n` +
+        `Halo ${actorEmojiEmoji}! 👋\n\n` +
         `📝 *Fitur Utama:*\n` +
         `• *Catat transaksi:* "Beli kopi 35rb"\n` +
         `• *Cek saldo:* /saldo atau "saldo"\n` +
@@ -63,7 +67,7 @@ bot.start((ctx) => {
         `• *Bayar tagihan:* /bayar [nama]\n` +
         `• *Bayar cicilan:* /cicil [nama]\n` +
         `• *Foto struk:* Kirim foto langsung\n\n` +
-        `Aktor: *${ctx.state.actor === 'suami' ? '🧑 Qisthi' : '👩 Gita'}*`,
+        `Aktor: *${actorEmojiEmoji}*`,
         { parse_mode: 'Markdown' }
     );
 });
