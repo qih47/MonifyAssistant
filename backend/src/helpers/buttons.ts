@@ -34,23 +34,20 @@ export async function getPocketButtons(txId: string): Promise<Array<Array<{ text
 
         const buttons: Array<Array<{ text: string; callback_data: string }>> = [];
         
-        // 📌 PERBAIKAN 2: Ubah layout menjadi 1 tombol per baris (Single Column Layout)
-        // Karena teks sekarang panjang (ada nama kantong, saldo, dan jenis asset), 
-        // layout 2 kolom akan membuat teks terpotong di layar HP. 1 Baris = 1 Kantong jauh lebih rapi!
+        // 📌 PERBAIKAN 2: Render flat horizontal satu baris per pocket
         pockets.forEach((p) => {
             const icon = getPocketIcon(p.ownership, p.name);
-            const cleanName = p.display_name || formatPocketName(p.name);
             const balanceText = formatIDR(Number(p.current_balance || 0));
             
             // Ambil nama asset induk hasil relasi foreign key database lu
             // @ts-ignore
             const assetName = p.assets?.name || 'Umum';
 
-            // 📌 PERBAIKAN 3: Satukan informasi menjadi tombol multi-baris yang informatif
-            // Format: 💳 Listrik Dan Pulsa (Rp 210.499) ➔ Sumber: LinkAja
-            const buttonText = `${icon} ${cleanName} (${balanceText})\n↳ 🏦 Sumber: ${assetName}`;
+            // 📌 PERBAIKAN 3: Sembunyikan nama pocket, langsung tampilkan Asset Utama | Saldo Kantong
+            // Contoh Hasil: 🏦 Link Aja ➔ Rp 210.499
+            const buttonText = `🏦 ${assetName} ➔ ${balanceText}`;
 
-            // Push langsung sebagai 1 baris mandiri
+            // Push tetap berdasarkan p.id pocket asli agar logika transaksi database lu gak berubah
             buttons.push([{ text: buttonText, callback_data: `${prefix}:${txId}:${p.id}` }]);
         });
 
