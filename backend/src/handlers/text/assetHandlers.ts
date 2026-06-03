@@ -21,7 +21,9 @@ export async function handleTransferAsset(ctx: any, text: string) {
             return ctx.reply(`❌ Asset *"${targetAssetName}"* tidak ditemukan.`, { parse_mode: 'Markdown' });
         }
 
-        const actor = ctx.state.actor;
+        // 📌 PERBAIKAN 1: Kunci validasi aktor murni menggunakan session middleware Telegram sejak awal
+        const actor = ctx.state.actor || 'suami';
+        
         const { data: sourceAsset } = await supabase.from('assets').select('*').ilike('name', actor === 'suami' ? '%qisthi%' : '%gita%').eq('ownership', actor).single();
         if (!sourceAsset) return ctx.reply('❌ Asset sumber tidak ditemukan.');
 
@@ -30,11 +32,20 @@ export async function handleTransferAsset(ctx: any, text: string) {
         }
 
         const txId = 'tfa' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+        
+        // 📌 PERBAIKAN 2: Tambahkan "as any" saat melakukan .set() agar literal object baru (seperti subtype/receipt_type default) aman dari error ts(2561)
         pendingTransactions.set(txId, {
-            amount, actor, description: `Transfer ke ${targetAsset.name}`, type: 'transfer',
-            timestamp: Date.now(), category: 'transfer_antar_asset', merchant: targetAsset.name,
-            transaction_date: new Date().toISOString()
-        });
+            amount, 
+            actor, 
+            description: `Transfer ke ${targetAsset.name}`, 
+            type: 'transfer',
+            timestamp: Date.now(), 
+            category: 'transfer_antar_asset', 
+            merchant: targetAsset.name,
+            transaction_date: new Date().toISOString(),
+            transaction_subtype: 'asset_transfer',
+            receipt_type: 'transfer'
+        } as any);
 
         await ctx.reply(
             '💸 *KONFIRMASI TRANSFER ASSET*\n\n' +

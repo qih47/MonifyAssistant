@@ -21,15 +21,19 @@ export async function handlePhotoMessage(ctx: any) {
 
         if (hasilParse) {
             const { amount, description, type, actor: aiActor, category, merchant, transaction_date, transaction_subtype } = hasilParse;
-            const finalActor = aiActor === 'auto' ? ctx.state.actor : aiActor;
+
+            // 📌 FIX UTAMA: Kunci aktor berdasarkan session pengirim chat Telegram dari Middleware!
+            // Jangan biarkan tebakan LLM menimpa identitas asli pengguna yang sedang aktif chat.
+            const finalActor = ctx.state.actor || (aiActor !== 'auto' ? aiActor : 'suami');
 
             const txId = 'img' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
             
-            // NEW: Analyze receipt type for intelligent routing
+            // Analyze receipt type for intelligent routing
             const receiptAnalysis = analyzeReceiptType(description);
             const subtypeFromAnalyzer = mapReceiptTypeToSubtype(receiptAnalysis.type);
             const finalSubtype = transaction_subtype || subtypeFromAnalyzer;
             
+            // Simpan ke temporary state dengan menyertakan "as any" untuk menghindari strict type compile error
             pendingTransactions.set(txId, {
                 amount, 
                 actor: finalActor, 
@@ -39,28 +43,40 @@ export async function handlePhotoMessage(ctx: any) {
                 category, 
                 merchant, 
                 transaction_date,
-                receipt_type: receiptAnalysis.type,  // NEW: Store receipt type for routing
-                transaction_subtype: finalSubtype    // NEW: Store subtype (from AI or analyzer)
-            });
+                receipt_type: receiptAnalysis.type,
+                transaction_subtype: finalSubtype
+            } as any);
 
             const formattedAmount = formatIDR(amount);
+            
+            // Konfigurasi visual avatar emoji berdasarkan aktor asli yang valid
             const actorEmojiPreview = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
             const keyboardButtons = await getPocketButtons(txId);
-            const dateText = new Date(transaction_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+            
+            // Safety parsing tanggal dari LLM untuk menghindari crash Invalid Date
+            let dateText = '';
+            try {
+                const parsedDate = new Date(transaction_date);
+                dateText = isNaN(parsedDate.getTime())
+                    ? new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+                    : parsedDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+            } catch {
+                dateText = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+            }
 
             // Dynamic type display based on AI parsing
             const typeEmoji = type === 'income' ? '🟢' : type === 'transfer' ? '🔵' : '🔴';
             const typeLabel = type === 'income' ? 'Pemasukan' : type === 'transfer' ? 'Transfer' : 'Pengeluaran';
 
-            // NEW: Use specialized confirmation title based on receipt type
+            // Use specialized confirmation title based on receipt type
             const confirmationTitle = getConfirmationTitle(receiptAnalysis.type);
 
             await ctx.reply(
                 `━━━━━━━━━━━━━━━━━━━\n${confirmationTitle}\n━━━━━━━━━━━━━━━━━━━\n\n` +
                 `📝 *${description}*\n` +
                 `💰 Nominal: *${formattedAmount}*\n` +
-                `🏬 Merchant: *${merchant}*\n` +
-                `🏷️ Kategori: *${category.replace('_', ' ')}*\n` +
+                `🏬 Merchant: *${merchant || 'umum'}*\n` +
+                `🏷️ Kategori: *${(category || 'lainnya').replace('_', ' ')}*\n` +
                 `📅 Tanggal: *${dateText}*\n` +
                 `${typeEmoji} Tipe: *${typeLabel}*\n` +
                 `👤 Oleh: ${actorEmojiPreview}\n\n` +

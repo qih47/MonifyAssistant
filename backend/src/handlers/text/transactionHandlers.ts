@@ -54,7 +54,9 @@ export async function handleFinancialText(ctx: any, pesanAsli: string, userName:
     const goal_name = hasilParse.goal_name || null;
     const transaction_subtype = hasilParse.transaction_subtype || null;
 
-    const finalActor = aiActor === 'auto' ? ctx.state.actor : aiActor;
+    // 📌 PERBAIKAN UTAMA: Amankan dari tebakan LLM, utamakan user yang chat di Telegram!
+    const finalActor = ctx.state.actor || (aiActor !== 'auto' ? aiActor : 'suami');
+    
     const txId = (is_saving_goal ? 'sg' : 'tx') + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
 
     const receiptAnalysis = analyzeReceiptType(description);
@@ -94,7 +96,7 @@ export async function handleFinancialText(ctx: any, pesanAsli: string, userName:
 
     if (is_saving_goal && goal_name) {
         await ctx.reply(
-            `━━━━━━━━━━━━━━━━━━━\n🎯 *KONFIRMASI TARGET TABUNGAN*\n━━━━━━━━━━━━━━━━━━━\n\n` +
+            `━━━━━━━━━━━━━━━━━━━\n🎯 *KONFIRMASI TARGET TARGET TABUNGAN*\n━━━━━━━━━━━━━━━━━━━\n\n` +
             `📦 Impian: *${goal_name}*\n` +
             `💰 Setoran: *${formattedAmount}*\n` +
             `👤 Oleh: ${actorEmojiPreview}\n\n` +
