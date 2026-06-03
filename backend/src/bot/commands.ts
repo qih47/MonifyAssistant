@@ -19,16 +19,35 @@ export function registerTextCommands(bot: Telegraf<any>) {
     });
     bot.command('laporan', async (ctx) => { return await handleLaporan(ctx); });
     bot.command('help', async (ctx) => {
-        return await ctx.reply(
-            `━━━━━━━━━━━━━━━━━━━\n🤖 *MONI - ASISTEN KEUANGAN* \n━━━━━━━━━━━━━━━━━━━\n\n` +
-            `💰 *1. CATAT TRANSAKSI NATURAL*\nKetik kalimat santai, AI otomatis parse.\n• "Beli nasi padang 35rb"\n• "Gaji masuk 8jt"\n• "Transfer ke gopay 200rb"\n\n` +
-            `📸 *2. OCR MULTI-DOKUMEN*\nKirim foto struk, token listrik, tagihan.\nAI baca nominal & kategori otomatis.\n\n` +
-            `🧾 *3. BAYAR TAGIHAN*\n/bayar [nama] atau "bayar wifi"\nKonfirmasi sekali-klik via button.\n\n` +
-            `🏠 *4. BAYAR CICILAN*\n/cicil [nama] atau "cicil motor"\nTrack progress cicilan bulanan.\n\n` +
-            `📊 *5. CEK SALDO REAL-TIME*\n/saldo atau "cek saldo"\nLaporan lengkap pockets + assets.\nTermasuk emas (gram) & rekening.\n\n` +
-            `📁 *6. EXPORT DATA CSV*\n/laporan atau "export"\nDownload riwayat transaksi.\n\n` +
-            `━━━━━━━━━━━━━━━━━━━\n🤖 Moni siap bantu 24/7! 🚀`,
-            { parse_mode: 'Markdown' }
-        );
+        const helpMessage =
+            `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `🤖  *MONIFY FINANCE ASSISTANT* \n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `Halo! Aku *Moni*, asisten keuangan pribadimu. Kamu bisa mencatat dan mengelola keuanganmu secara otomatis lewat chat biasa. Berikut fitur utama yang bisa aku lakukan:\n\n` +
+            `📝 *1. CATAT TRANSAKSI (AI PARSER)*\n` +
+            `Cukup ketik kalimat natural, Moni akan otomatis mendeteksi nominal, kategori, dan tipenya.\n` +
+            `• 🛍️ *Pengeluaran:* \`Beli kopi starbucks 45rb\`\n` +
+            `• 💵 *Pemasukan:* \`Gaji bulanan masuk 8.5jt\`\n` +
+            `• 📸 *Struk/Nota:* Kirim foto struk belanjaanmu, Moni akan baca otomatis via OCR!\n` +
+            `• 💳 *Transfer Antar Asset:* \`Transfer ke GoPay 100rb\`\n\n` +
+            `🎯 *2. MANAJEMEN TABUNGAN / IMPIAN*\n` +
+            `Kelola alokasi dana khusus untuk barang impianmu.\n` +
+            `• 📥 *Nabung:* \`Nabung Air Purifier 500rb\`\n` +
+            `• 🔍 *Cek Target:* \`cek tabungan\` atau \`progres impian\`\n\n` +
+            `💳 *3. TAGIHAN & CICILAN CONVENIENCE*\n` +
+            `Moni bisa bantu kelola pos pengeluaran rutin.\n` +
+            `• 🌐 *Tagihan:* \`/bayar wifi\` atau \`bayar kosan 1.2jt\` atau kirim foto tagihan\n` +
+            `• 🏍️ *Cicilan:* \`/cicil motor\` atau \`cicil mobil 2.5jt\` atau kirim foto slip cicilan\n\n` +
+            `📊 *4. MONITORING & LAPORAN*\n` +
+            `Pantau kondisi kesehatan keuanganmu kapan saja.\n` +
+            `• 💰 *Cek Saldo:* \`/saldo\` atau ketik \`cek saldo\`\n` +
+            `• 📋 *Rekapitulasi Bulanan:* \`/ringkasan\` atau ketik \`rekap\`\n` +
+            `• 📁 *Ekspor Data:* \`/laporan\` atau \`export csv\`\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `💡 *Tips:* Ketik perintah dengan santai, AI Moni akan berusaha memahaminya. Moni siap membantu 24/7! 🚀`;
+        return await ctx.reply(helpMessage, {
+            parse_mode: 'Markdown',
+            link_preview_options: { is_disabled: true }
+        });
     });
 }

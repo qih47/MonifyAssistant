@@ -15,7 +15,14 @@ export function authMiddleware(ALLOWED_CHAT_IDS: string[], ALLOWED_USERS: Record
             return;
         }
 
-        ctx.state.actor = ALLOWED_USERS[chatId as keyof typeof ALLOWED_USERS] || 'suami';
+        const fromId = ctx.from?.id?.toString();
+        let actor = 'suami';
+        if (fromId && ALLOWED_USERS[fromId]) {
+            actor = ALLOWED_USERS[fromId];
+        } else if (chatId && ALLOWED_USERS[chatId]) {
+            actor = ALLOWED_USERS[chatId];
+        }
+        ctx.state.actor = actor;
 
         if ((ctx.updateType === 'message' && ctx.message) || ctx.updateType === 'callback_query') {
             return next();
