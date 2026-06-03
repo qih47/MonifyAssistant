@@ -1,24 +1,30 @@
 import { supabase } from '../../config/supabaseClient.js';
 import { formatIDR } from '../../helpers/formatters.js';
-// 📌 IMPLEMENTASI UTUH: Kedua service ini kita hidupkan dan gunakan di dalam logic!
 import { sendTransactionEmailNotification } from '../../services/notificationService.js';
 import { checkAndNotifyLowFund } from '../../services/lowFundService.js';
 
-// Helper internal untuk menghitung tanggal jatuh tempo dinamis berdasarkan int4 hari ini
+// 📌 FIX LOGIC JATUH TEMPO: Menghitung tanggal aktual tahun 2026 secara akurat
 function dapatkanTanggalJatuhTempo(hariJatuhTempo: number): string {
-    const hariIni = new Date(); // Mendeteksi waktu riil sistem (Juni 2026)
-    let tahun = hariIni.getFullYear();
-    let bulan = hariIni.getMonth(); // 0 = Jan, 5 = Juni, dst.
+    const hariIni = new Date(); // Hari ini: Rabu, 3 Juni 2026
+    const tahunSekarang = hariIni.getFullYear();
+    const bulanSekarang = hariIni.getMonth(); // Juni = indeks 5
+    const tanggalSekarang = hariIni.getDate(); // Tanggal 3
 
-    // Buat objek tanggal jatuh tempo untuk bulan berjalan
-    let tanggalTarget = new Date(tahun, bulan, hariJatuhTempo);
+    // Langkah 1: Buat target jatuh tempo di bulan berjalan (Juni 2026)
+    let tanggalTarget = new Date(tahunSekarang, bulanSekarang, hariJatuhTempo);
 
-    // Jika hari ini sudah melewati tanggal jatuh tempo bulan ini, arahkan ke bulan depan
-    if (hariIni.getDate() > hariJatuhTempo) {
-        tanggalTarget.setMonth(bulan + 1);
+    // Langkah 2: Jika tanggal sekarang (3) sudah MELEWATI hari jatuh tempo (misal due_date = 1),
+    // maka tagihan tersebut dipindahkan ke bulan berikutnya (Juli 2026).
+    // Tapi jika due_date = 5, karena sekarang tanggal 3, berarti tetap di bulan Juni 2026!
+    if (tanggalSekarang > hariJatuhTempo) {
+        tanggalTarget.setMonth(bulanSekarang + 1);
     }
 
-    return tanggalTarget.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    return tanggalTarget.toLocaleDateString('id-ID', { 
+        day: 'numeric', 
+        month: 'long', 
+        year: 'numeric' 
+    });
 }
 
 export async function handleListTagihan(ctx: any) {
@@ -41,10 +47,9 @@ export async function handleListTagihan(ctx: any) {
         bills.forEach((b, i) => {
             totalTagihan += Number(b.amount);
             
-            // Deteksi dinamis tanggal jatuh tempo dari integer int4 database
-            const dueDate = b.due_date
-                ? dapatkanTanggalJatuhTempo(Number(b.due_date))
-                : 'Tgl tidak diketahui';
+            // 📌 FIX PARSING: Amankan ekstraksi nilai int4 dari row database Supabase
+            const nilaiHari = b.due_date !== undefined && b.due_date !== null ? Number(b.due_date) : 1;
+            const dueDate = dapatkanTanggalJatuhTempo(nilaiHari);
                 
             listText += `${i + 1}. *${b.name}*\n   💰 ${formatIDR(Number(b.amount))} | 📅 Jatuh tempo: ${dueDate}\n\n`;
         });
@@ -72,7 +77,8 @@ export async function handleBayarTagihan(ctx: any, namaTagihan: string) {
         if (bills.length > 1) {
             let listText = `🤔 Ditemukan beberapa tagihan:\n\n`;
             bills.forEach((b, idx) => {
-                const dueDate = b.due_date ? dapatkanTanggalJatuhTempo(Number(b.due_date)) : '?';
+                const nilaiHari = b.due_date !== undefined && b.due_date !== null ? Number(b.due_date) : 1;
+                const dueDate = dapatkanTanggalJatuhTempo(nilaiHari);
                 listText += `${idx + 1}. *${b.name}* — ${formatIDR(Number(b.amount))} (Jatuh tempo: ${dueDate})\n`;
             });
             listText += '\nSilakan ketik lebih spesifik.\nContoh: `bayar wifi biznet`';
@@ -84,10 +90,10 @@ export async function handleBayarTagihan(ctx: any, namaTagihan: string) {
         const actor = ctx.state.actor || 'suami';
         const encodedName = encodeURIComponent(bill.name);
         
-        // Sinkronisasi tanggal jatuh tempo dinamis pada menu konfirmasi
-        const dueDate = bill.due_date ? dapatkanTanggalJatuhTempo(Number(bill.due_date)) : 'Tidak diketahui';
+        // 📌 FIX PARSING: Samakan logika tanggal jatuh tempo pada menu konfirmasi pembayaran
+        const nilaiHariBill = bill.due_date !== undefined && bill.due_date !== null ? Number(bill.due_date) : 1;
+        const dueDate = dapatkanTanggalJatuhTempo(nilaiHariBill);
 
-        // Ambil data pockets + join assets induk untuk kebutuhan visual button custom ringkas lu
         const { data: pockets } = await supabase
             .from('pockets')
             .select(`
@@ -104,16 +110,12 @@ export async function handleBayarTagihan(ctx: any, namaTagihan: string) {
 
         const inline_keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
         if (pockets && pockets.length > 0) {
-            
             pockets.forEach((p) => {
                 const currentBalance = Number(p.current_balance || 0);
                 const balanceText = formatIDR(currentBalance);
                 
                 // @ts-ignore
                 const assetName = p.assets?.name || 'Umum';
-
-                // 📌 IMPLEMENTASI 1: Jalankan checkAndNotifyLowFund secara pasif sebelum user klik tombol
-                // Jika saldo di pocket kurang dari nominal tagihan harian, pasang alert emoji (⚠️)
                 const lowFundWarning = currentBalance < amount ? '⚠️ ' : '';
                 
                 if (currentBalance < amount) {
@@ -121,7 +123,6 @@ export async function handleBayarTagihan(ctx: any, namaTagihan: string) {
                         .catch(err => console.error('❌ Gagal trigger alert low fund:', err));
                 }
 
-                // 📌 IMPLEMENTASI LAYOUT CUSTOM RINGKAS: Sembunyikan nama pocket, langsung Asset | Saldo
                 const buttonText = `${lowFundWarning}🏦 ${assetName} | ${balanceText}`;
                 
                 inline_keyboard.push([{
@@ -134,14 +135,13 @@ export async function handleBayarTagihan(ctx: any, namaTagihan: string) {
         }
         inline_keyboard.push([{ text: '❌ Batal', callback_data: 'cancel_bill' }]);
 
-        // 📌 IMPLEMENTASI 2: Kirim email notifikasi bahwa transaksi tagihan baru saja dipicu oleh aktor aktif
         sendTransactionEmailNotification({ 
             actor, 
             amount, 
             description: `Membuka Menu Bayar Tagihan: ${bill.name}`, 
             type: 'expense', 
             pocketName: 'System Check' 
-        }).catch(err => console.error('❌ Notifikasi email pemicu tagihan gagal:', err));
+        }).catch(err => console.error('❌ Notifikasi email gagal:', err));
 
         await ctx.reply(
             '━━━━━━━━━━━━━━━━━━━\n🧾 *KONFIRMASI BAYAR TAGIHAN*\n━━━━━━━━━━━━━━━━━━━\n\n' +
