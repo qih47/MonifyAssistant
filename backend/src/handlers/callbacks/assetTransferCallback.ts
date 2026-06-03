@@ -10,10 +10,17 @@ export async function handleAssetTransferCallback(ctx: any, callbackData: string
     const targetAssetId = Number(parts[2]);
     const sourceAssetId = Number(parts[3]);
 
-    const txData = pendingTransactions.get(txId);
+    // 📌 PERBAIKAN 1: Tambahkan casting "as any" saat ambil data state agar lolos dari kompilasi strict tsc
+    const txData = pendingTransactions.get(txId) as any;
     if (!txData) { await ctx.answerCbQuery('❌ Data expired.'); return; }
 
-    const { amount, actor } = txData;
+    let { amount, actor } = txData;
+    
+    // 📌 PERBAIKAN 2: Amankan validasi aktor dari middleware session Telegram seperti handler lainnya
+    if (!actor || actor === 'auto' || (actor !== 'suami' && actor !== 'istri')) {
+        actor = ctx.state.actor || 'suami';
+    }
+    
     pendingTransactions.delete(txId);
 
     try {
