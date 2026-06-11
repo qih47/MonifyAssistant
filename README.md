@@ -178,7 +178,21 @@ Berdasarkan hasil analisis struktur proyek, terdapat beberapa berkas yang teride
 
 ---
 
-## 💡 Rekomendasi Optimasi Masa Depan
-1. **Peningkatan Manajemen State Obrolan Grup**: Menambahkan database-backed session management untuk bot Telegram agar penanganan alur percakapan multi-langkah di grup menjadi lebih andal tanpa risiko tumpang tindih antar user.
-2. **Auto-caching Harga Emas**: Menambahkan cron job untuk memperbarui dan menyimpan harga emas secara berkala dari API luar daripada menggunakan nilai default konstan, menjaga akurasi Net Worth otomatis.
-3. **Penyempurnaan Keamanan API**: Membatasi CORS frontend secara ketat pada server produksi dan menerapkan policy RLS (Row Level Security) yang lebih granular di Supabase untuk pembagian data personal jika dikembangkan menjadi multi-family hub.
+## 💡 Rekomendasi Optimasi & Pembaruan Sistem
+
+Berikut adalah rekomendasi fitur dan perubahan fungsi agar sistem berjalan lebih optimal, terbagi berdasarkan fitur terkait:
+
+### 1. 🤖 AI Telegram Bot (Moni)
+- **Group Conversation State Management (Peningkatan State)**: Menggunakan database-backed session management untuk Telegraf. Hal ini penting untuk mengisolasi state transaksi pending ketika Qisthi dan Gita mengetik secara bersamaan di grup keluarga agar state data tidak tumpang tindih.
+- **Interactive Inline Reports (Peningkatan Fitur Laporan)**: Menambahkan menu inline keyboard khusus pada pesan balasan `/help` atau command baru agar user dapat memicu pembuatan laporan mingguan/bulanan langsung dari Telegram dengan sekali klik tombol (bukan hanya command teks).
+
+### 2. 📅 Bills Management (Sistem Tagihan & Paylater)
+- **Auto-Recurring Auto-Debit (Otomasi Pembayaran)**: Menambahkan opsi otorisasi auto-debit dari aset terpilih untuk tagihan rutin (seperti tagihan listrik/wifi) ketika mendeteksi hari jatuh tempo lewat cron, dengan konfirmasi akhir dikirimkan ke Telegram.
+- **Notifikasi Tagihan & Paylater Spesifik (Telah Diimplementasikan)**: Menyaring dan mendeteksi tipe tagihan paylater vs tagihan bulanan biasa via regex nama di tabel `bills` untuk memberikan emoji 💳/🧾 serta judul peringatan yang disesuaikan dalam pemberitahuan cron.
+
+### 3. 💼 Assets Tracker (Pelacak Aset & Kekayaan)
+- **Auto-caching Harga Emas (Peningkatan Nilai Aset)**: Mengintegrasikan cron job dengan API harga emas eksternal (seperti Metalprice API atau Logam Mulia scraper) untuk memperbarui harga emas per gram secara dinamis di database. Hal ini menjaga keakuratan widget Net Worth pada dashboard secara otomatis tanpa *hardcoded price*.
+
+### 4. 🔐 Keamanan & Skalabilitas (Sistem Utama)
+- **Multi-Family Separation (RLS Supabase)**: Mengatur Row Level Security (RLS) di database Supabase agar mendukung multi-keluarga. Struktur data dapat dipisahkan menggunakan kolom `family_id` sehingga satu instance database dapat digunakan oleh banyak keluarga dengan aman.
+- **Strict CORS & API Gateway Protection**: Membatasi domain asal (CORS) backend ke URL frontend produksi secara ketat dan menggunakan API gateway untuk membatasi laju permintaan (rate limiting) dari pihak luar.
