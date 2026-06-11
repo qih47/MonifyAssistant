@@ -12,46 +12,82 @@ export function setBotInstance(bot: any) {
 // ==========================================
 export async function checkDueBills() {
     try {
+        if (!botInstance) {
+            console.log('⚠️ Cron: Bot instance belum di-set, menunda notifikasi tagihan.');
+            return;
+        }
+
         const sekarang = new Date();
-        const tujuhHariLagi = new Date(sekarang.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const tujuhHariLagiEpoch = Math.floor(tujuhHariLagi.getTime() / 1000);
-        const sekarangEpoch = Math.floor(sekarang.getTime() / 1000);
+        
+        // Dapatkan rentang tanggal hari dari hari ini hingga 7 hari ke depan (mengatasi wrap-around akhir bulan)
+        const targetDays: number[] = [];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(sekarang.getTime() + i * 24 * 60 * 60 * 1000);
+            targetDays.push(d.getDate());
+        }
 
-        console.log(`🔍 Cron: Cek tagihan jatuh tempo antara ${sekarang.toLocaleDateString('id-ID')} - ${tujuhHariLagi.toLocaleDateString('id-ID')}`);
+        console.log(`🔍 Cron: Memeriksa tagihan/paylater jatuh tempo untuk tanggal-tanggal: ${targetDays.join(', ')}`);
 
-        // Cari tagihan unpaid yang due_date-nya dalam 7 hari ke depan
+        // Ambil semua tagihan unpaid
         const { data: bills, error } = await supabase
             .from('bills')
             .select('*')
-            .eq('status', 'unpaid')
-            .gte('due_date', sekarangEpoch)
-            .lte('due_date', tujuhHariLagiEpoch);
+            .eq('status', 'unpaid');
 
         if (error) throw error;
 
         if (!bills || bills.length === 0) {
-            console.log('✅ Tidak ada tagihan yang mendekati jatuh tempo.');
+            console.log('✅ Tidak ada tagihan unpaid di database.');
             return;
         }
 
-        console.log(`📋 Ditemukan ${bills.length} tagihan mendekati jatuh tempo.`);
+        // Filter tagihan yang due_date nya jatuh pada targetDays
+        const dueBills = bills.filter(bill => {
+            const dueDay = bill.due_date !== undefined && bill.due_date !== null ? Number(bill.due_date) : 1;
+            return targetDays.includes(dueDay);
+        });
 
-        // Kirim notif ke Telegram untuk setiap tagihan
-        for (const bill of bills) {
-            const dueDate = new Date(bill.due_date * 1000).toLocaleDateString('id-ID', { 
+        if (dueBills.length === 0) {
+            console.log('✅ Tidak ada tagihan/paylater yang mendekati jatuh tempo dalam 7 hari ini.');
+            return;
+        }
+
+        console.log(`📋 Ditemukan ${dueBills.length} tagihan/paylater mendekati jatuh tempo.`);
+
+        // Kirim notif ke Telegram untuk setiap tagihan yang due
+        for (const bill of dueBills) {
+            const dueDay = bill.due_date !== undefined && bill.due_date !== null ? Number(bill.due_date) : 1;
+            
+            // Hitung tanggal jatuh tempo aktual (bulan berjalan atau bulan depan)
+            const tahunSekarang = sekarang.getFullYear();
+            const bulanSekarang = sekarang.getMonth();
+            const tanggalSekarang = sekarang.getDate();
+
+            let tanggalTarget = new Date(tahunSekarang, bulanSekarang, dueDay);
+            if (tanggalSekarang > dueDay) {
+                tanggalTarget.setMonth(bulanSekarang + 1);
+            }
+
+            const diffTime = tanggalTarget.getTime() - sekarang.getTime();
+            const sisaHari = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+            
+            const dueDateText = tanggalTarget.toLocaleDateString('id-ID', { 
                 day: 'numeric', 
                 month: 'long', 
                 year: 'numeric' 
             });
-            
-            const sisaHari = Math.ceil((bill.due_date * 1000 - sekarang.getTime()) / (1000 * 60 * 60 * 24));
-            
+
+            // Bedakan notifikasi antara Paylater/CC dengan Tagihan biasa
+            const isPaylater = /paylater|kredivo|akulaku|cc|credit|kartu kredit|bnpl|g-cash|gcash/i.test(bill.name);
+            const emoji = isPaylater ? '💳' : '🧾';
+            const title = isPaylater ? 'PENGINGAT PAYLATER!' : 'PENGINGAT TAGIHAN!';
+
             const pesan = `
-⚠️ **PENGINGAT TAGIHAN!** ⚠️
+${emoji} **${title}** ${emoji}
 ━━━━━━━━━━━━━━━━━━━
 📝 *${bill.name}*
 💰 Nominal: *Rp${Number(bill.amount).toLocaleString('id-ID')}*
-📅 Jatuh Tempo: *${dueDate}*
+📅 Jatuh Tempo: *${dueDateText}*
 ⏰ Sisa: *${sisaHari} hari lagi*
 
 Jangan lupa bayar ya, Cuy! 🚀
@@ -61,7 +97,7 @@ Jangan lupa bayar ya, Cuy! 🚀
             const allowedUsers = JSON.parse(process.env.ALLOWED_USERS || '{}');
             for (const chatId of Object.keys(allowedUsers)) {
                 try {
-                    await botInstance.telegram.sendMessage(chatId, pesan, { parse_mode: 'Markdown' });
+                    await botInstance.telegram.sendMessage(chatId, pesan.trim(), { parse_mode: 'Markdown' });
                     console.log(`✅ Notif tagihan terkirim ke ${chatId}: ${bill.name}`);
                 } catch (err) {
                     console.error(`❌ Gagal kirim ke ${chatId}:`, err);
@@ -79,6 +115,11 @@ Jangan lupa bayar ya, Cuy! 🚀
 // ==========================================
 export async function checkDueInstallments() {
     try {
+        if (!botInstance) {
+            console.log('⚠️ Cron: Bot instance belum di-set, menunda notifikasi cicilan.');
+            return;
+        }
+
         const sekarang = new Date();
         const sekarangEpoch = Math.floor(sekarang.getTime() / 1000);
 
