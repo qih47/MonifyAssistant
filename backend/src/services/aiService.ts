@@ -28,11 +28,10 @@ export interface ParsedTransaction {
     transaction_date: string;
     is_saving_goal: boolean;
     goal_name: string | null;
-    bill_name?: string;
-    installment_name?: string;
+    bill_name?: string | null;
+    installment_name?: string | null;
 }
 
-// Database state snapshot for LLM context injection
 interface DatabaseStateSnapshot {
     pockets: Array<{ id: number; name: string; display_name: string; current_balance: number; ownership: string }>;
     assets: Array<{ id: number; name: string; balance: number; gold_weight_gram?: number; category: string; ownership: string }>;
@@ -43,7 +42,6 @@ interface DatabaseStateSnapshot {
 let groqAvailable = GROQ_API_KEY ? true : false;
 let geminiAvailable = GEMINI_API_KEY ? true : false;
 
-// Fetch lean database state snapshot for LLM context
 async function fetchDatabaseStateSnapshot(): Promise<DatabaseStateSnapshot | undefined> {
     try {
         const [pocketsResult, assetsResult, billsResult, installmentsResult] = await Promise.all([
@@ -64,17 +62,17 @@ async function fetchDatabaseStateSnapshot(): Promise<DatabaseStateSnapshot | und
         };
     } catch (error) {
         console.error('❌ Failed to fetch database state snapshot:', error);
-        return undefined; // 📌 FIX: Kembalikan undefined saat catch error agar aman
+        return undefined;
     }
 }
 
-// Shared Prompt Builder untuk standarisasi logika berpikir AI (Groq & Gemini)
+// FORMATTER SYSTEM INSTRUCTION YANG SUDAH DIOPTIMALKAN (BEBAS KEYWORD KAKU)
 const getSystemInstruction = (dbSnapshot?: DatabaseStateSnapshot) => {
     const hariIni = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     
     let contextData = '';
     if (dbSnapshot) {
-        const pocketsList = dbSnapshot.pockets.map(p => `- ${p.display_name || p.name} (${p.ownership}): Rp ${Number(p.current_balance).toLocaleString('id-ID')}`).join('\n');
+        const pocketsList = dbSnapshot.pockets.map(p => `- ${p.name} [Display: ${p.display_name || p.name}] (${p.ownership}): Rp ${Number(p.current_balance).toLocaleString('id-ID')}`).join('\n');
         const assetsList = dbSnapshot.assets.map(a => {
             const balanceInfo = a.category?.includes('emas') || a.category?.includes('gold') 
                 ? `${a.gold_weight_gram || 0} gram` 
@@ -85,15 +83,15 @@ const getSystemInstruction = (dbSnapshot?: DatabaseStateSnapshot) => {
             ? dbSnapshot.unpaidBills.map(b => `- ${b.name}: Rp ${Number(b.amount).toLocaleString('id-ID')}`).join('\n')
             : 'Tidak ada tagihan unpaid';
         const installmentsList = dbSnapshot.activeInstallments.length > 0
-            ? dbSnapshot.activeInstallments.map(i => `- ${i.name}: Rp ${Number(i.monthly_amount).toLocaleString('id-ID')}/bulan (Bulan ${i.paid_months}/${i.tenor_months})`).join('\n')
+            ? dbSnapshot.activeInstallments.map(i => `- ${i.name}: Rp ${Number(i.monthly_amount).toLocaleString('id-ID')}/bulan`).join('\n')
             : 'Tidak ada cicilan aktif';
         
         contextData = `
-\n📊 DATA KEUANGAN REAL-TIME (Gunakan ini untuk jawaban akurat):
-\n💼 KANTONG ANGGARAN:\n${pocketsList}
+\n📊 DATA KEUANGAN REAL-TIME KELUARGA (Valid & Aktual):
+\n💼 KANTONG ANGGARAN SAAT INI:\n${pocketsList}
 \n🏦 ASET FISIK:\n${assetsList}
-\n📋 TAGIHAN BELUM DIBAYAR:\n${billsList}
-\n🏠 CICILAN AKTIF:\n${installmentsList}\n`;
+\n📋 TAGIHAN BELUM DIBAYAR (BILLS):\n${billsList}
+\n🏠 CICILAN AKTIF (INSTALLMENTS):\n${installmentsList}\n`;
     }
     
     return `Kamu adalah Moni, AI asisten keuangan keluarga cerdas untuk Qisthi (suami) dan Gita (istri).
@@ -104,48 +102,38 @@ Output HARUS berupa JSON valid tanpa teks tambahan di luar JSON. Format skema:
   "amount": integer (nominal murni rupiah),
   "description": string (Deskripsi singkat, huruf kapital di awal),
   "type": "income" | "expense" | "transfer",
-  "transaction_subtype": string (HARUS: "purchase" | "bill_payment" | "installment_payment" | "paylater_payment" | "saving_goal" | "asset_transfer"),
-  "allocated_pocket": string (snake_case nama kantong spesifik jika disebutkan, contoh: "listrik_dan_pulsa", "oprasional_bersama", "dana_darurat", "oprasional_qisthi", atau "ASK_USER"),
+  "transaction_subtype": "purchase" | "bill_payment" | "installment_payment" | "paylater_payment" | "saving_goal" | "asset_transfer",
+  "allocated_pocket": string (Nama 'name' kantong spesifik dari data real-time, atau "ASK_USER"),
   "actor": "suami" | "istri" | "auto",
-  "category": string (enum: makanan_minuman, elektronik, transportasi, keperluan_bayi, tagihan_rutin, jajan_hiburan, investasi_tabungan, transfer_antar_asset, lainnya),
-  "merchant": string (nama merchant/toko/aplikasi/instansi, default "umum"),
-  "transaction_date": string (ISO 8601 string hasil deteksi waktu/backdate relatif terhadap hari ini),
-  "is_saving_goal": boolean (true jika ada intent menabung untuk target masa depan),
-  "goal_name": string atau null (nama barang target tabungan murni tanpa kata kerja, contoh: "Kulkas", "Air Purifier"),
-  "bill_name": string atau null (nama tagihan jika bill_payment, contoh: "Listrik PLN", "Wifi IndiHome"),
-  "installment_name": string atau null (nama cicilan jika installment_payment, contoh: "Motor Yamaha", "Mobil Toyota")
+  "category": "makanan_minuman" | "elektronik" | "transportasi" | "keperluan_bayi" | "tagihan_rutin" | "jajan_hiburan" | "investasi_tabungan" | "transfer_antar_asset" | "lainnya",
+  "merchant": string (Nama merchant/toko/aplikasi/penyedia jasa, default "umum"),
+  "transaction_date": string (ISO 8601 string hasil deteksi waktu),
+  "is_saving_goal": boolean,
+  "goal_name": string | null,
+  "bill_name": string | null,
+  "installment_name": string | null
 }
 
-Aturan Ketat Parsing:
+⚠️ ATURAN REASONING & KLASIFIKASI KONTEN (PENTING):
 
-1. TRANSACTION_SUBTYPE (CRITICAL - ALWAYS ANALYZE):
-   - "bill_payment": Jika ada kata bayar + listrik, token pln, wifi, tagihan, air, gas, internet, cicilan kartu kredit
-     Contoh: "Bayar listrik 250rb", "Wifi 300rb", "Token PLN 100rb"
-   - "installment_payment": Jika ada kata cicilan, tenor, bayar cicilan
-     Contoh: "Cicilan motor 2jt", "Bayar cicilan mobil", "Tenor motor 3jt"
-   - "paylater_payment": Jika ada kata gcash, paylater, kredivo, akulaku, shopee paylater, bayar utang
-     Contoh: "Bayar GCash 100rb", "Paylater Kredivo 500rb", "Shopee Paylater 250rb"
-   - "saving_goal": Jika ada kata nabung, tabung, celengan, untuk impian, beli (barang impian)
-     Contoh: "Nabung laptop 2jt", "Tabung air purifier 500rb"
-   - "asset_transfer": Jika ada kata transfer, pindah dana, top-up ke rekening/e-wallet
-     Contoh: "Transfer ke gopay 100rb", "Pindahin dari mandiri ke bca 500rb", "Top-up gopay 200rb"
-   - "purchase": DEFAULT - belanja, jajan, beli (barang konsumsi), bayar service, bayar sewa
-     Contoh: "Beli kopi 45rb", "Belanja alfamart 150rb", "Servis motor 500rb"
+1. PENENTUAN TRANSACTION_SUBTYPE & INTELLIGENT ROUTING:
+   - JANGAN hanya mencocokkan kata kerja seperti "bayar" atau "cicil". Pahami maksud kontekstual kalimatnya.
+   - "bill_payment": Set jika pengguna membayar sesuatu yang COCOK atau mirip dengan daftar "TAGIHAN BELUM DIBAYAR (BILLS)" di atas. Jika user bilang "Bayar Wifi" dan di daftar bills ada "Wifi IndiHome", maka ini adalah bill_payment (isi bill_name: "Wifi IndiHome").
+   - "installment_payment": Set jika pengguna membayar sesuatu yang COCOK dengan daftar "CICILAN AKTIF (INSTALLMENTS)" di atas.
+   - "paylater_payment": Set jika ada konteks pelunasan utang aplikasi paylater (Kredivo, Shopee Paylater, Akulaku).
+   - "saving_goal": Set jika tujuannya adalah menabung/menyisihkan uang untuk target masa depan (misal: "Nabung buat kulkas").
+   - "asset_transfer": Set jika memindahkan uang antar rekening sendiri atau top-up e-wallet (GoPay, OVO, dll).
+   - "purchase" (DEFAULT PENGELUARAN): Jika pengguna menggunakan kata "bayar", "beli", atau "jajan" untuk jasa/barang konsumsi umum yang TIDAK ADA di daftar TAGIHAN/CICILAN resmi, maka ia adalah "purchase". 
+     * Contoh: "bayar cukur rambut 35rb" -> Jasa pangkas rambut tidak ada di daftar tagihan bulanan, maka subtype: "purchase", category: "lainnya" / "jajan_hiburan".
+     * Contoh: "bayar servis motor" -> subtype: "purchase", category: "transportasi".
 
-2. Waktu Kejadian (Backdate): Analisis kata 'kemarin', '2 hari lalu', atau tanggal tertentu, lalu mundurkan dari waktu sekarang ke objek tanggal ISO 8601 yang tepat.
+2. MAPPING KANTONG (allocated_pocket):
+   - Selaraskan dengan nama kantong ('name' bukan display_name) yang ada pada DATA KEUANGAN REAL-TIME. 
+   - Jika transaksi bersifat pengeluaran harian/rutin rumah tangga (makan, seblak, kebutuhan dapur) masuk ke "oprasional_bersama".
+   - Jika tidak ditemukan relasi kantong yang pas, isi dengan "ASK_USER".
 
-3. Klasifikasi Tipe: 
-   - 'income': uang masuk, gaji, bonus, pengembalian dana
-   - 'expense': belanja, jajan, bayar tagihan harian/paylater, cicilan
-   - 'transfer': memindahkan dana untuk ditabung (saving goals) atau pindah antar rekening
-
-4. Mapping Kantong Otomatis:
-   - Bayar listrik, token, pulsa, kuota, wifi -> pocket: "listrik_dan_pulsa", category: "tagihan_rutin", subtype: "bill_payment"
-   - Belanja bulanan, operasional rumah tangga, seblak, bakso -> pocket: "oprasional_bersama", category: "makanan_minuman", subtype: "purchase"
-   - Nabung/Tabung/Celengan untuk impian -> pocket: "ASK_USER", type: "transfer", category: "investasi_tabungan", is_saving_goal: true, subtype: "saving_goal"
-   - Transfer antar asset -> type: "transfer", category: "transfer_antar_asset", allocated_pocket: "ASK_USER", subtype: "asset_transfer"
-   - Cicilan -> pocket: sesuai cicilan, category: "tagihan_rutin", subtype: "installment_payment"
-   - PayLater -> pocket: "oprasional_bersama", category: "makanan_minuman" atau sesuai, subtype: "paylater_payment"`;
+3. WAKTU KEJADIAN (Backdate):
+   - Jika ada kata 'kemarin', '2 hari lalu', sesuaikan tanggalnya mundur dari hari ini secara akurat ke bentuk ISO 8601.`;
 };
 
 export async function parseWithGroq(text: string, dbSnapshot?: DatabaseStateSnapshot): Promise<ParsedTransaction | null> {
