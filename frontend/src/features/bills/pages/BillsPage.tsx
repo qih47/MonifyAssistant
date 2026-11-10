@@ -3,6 +3,7 @@ import { useBills, type Bill, type Installment } from '../hooks/useBills';
 import { usePockets } from '../../pockets/hooks/usePockets';
 import { formatIDR } from '../../../lib/formatter';
 import { formatDateIndo } from '../../../lib/dateFormatter';
+import { useFamily } from '../../../context/FamilyContext';
 import { supabase } from '../../../config/supabase';
 import { Plus, Loader2, X, Trash2, Percent } from 'lucide-react';
 import Swal from 'sweetalert2';
@@ -10,6 +11,7 @@ import Swal from 'sweetalert2';
 export const BillsPage = () => {
   const { bills, installments, loading, addBill, payBill, deleteBill, addInstallment, payInstallmentMonth, deleteInstallment } = useBills();
   const { pockets } = usePockets();
+  const { member1, member2, partnerEnabled } = useFamily();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'bill' | 'installment'>('bill');
@@ -79,8 +81,8 @@ export const BillsPage = () => {
         </select>
         <label style="display:block;text-align:left;font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;margin-top:12px;margin-bottom:6px;color:${s.labelColor};">Eksekutor:</label>
         <select id="swal-actor-select" style="font-size:13px;padding:8px;width:100%;background:${s.inputBg};color:${s.inputText};border:1px solid ${s.inputBorder};border-radius:8px;outline:none;">
-          <option value="suami">🧑 Qisthi (Suami)</option>
-          <option value="istri">👩 Gita (Istri)</option>
+          <option value="suami">🧑 ${member1.name} (${member1.role})</option>
+          ${partnerEnabled ? `<option value="istri">👩 ${member2.name} (${member2.role})</option>` : ''}
         </select>
       `,
       showCancelButton: true,
@@ -128,8 +130,8 @@ export const BillsPage = () => {
         </select>
         <label style="display:block;text-align:left;font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;margin-top:12px;margin-bottom:6px;color:${s.labelColor};">Eksekutor:</label>
         <select id="swal-actor-select" style="font-size:13px;padding:8px;width:100%;background:${s.inputBg};color:${s.inputText};border:1px solid ${s.inputBorder};border-radius:8px;outline:none;">
-          <option value="suami">🧑 Qisthi (Suami)</option>
-          <option value="istri">👩 Gita (Istri)</option>
+          <option value="suami">🧑 ${member1.name} (${member1.role})</option>
+          ${partnerEnabled ? `<option value="istri">👩 ${member2.name} (${member2.role})</option>` : ''}
         </select>
       `,
       showCancelButton: true,
@@ -195,9 +197,11 @@ export const BillsPage = () => {
 
   const getOwnershipLabel = (owner: string) => {
     switch (owner) {
-      case 'suami': return <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-50 border border-blue-100 text-blue-600 rounded-md dark:bg-blue-950/40 dark:text-blue-400">Kontrak Qisthi</span>;
-      case 'istri': return <span className="text-[10px] font-bold px-2 py-0.5 bg-pink-50 border border-pink-100 text-pink-600 rounded-md dark:bg-pink-950/40 dark:text-pink-400">Kontrak Gita</span>;
-      default: return <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-50 border border-slate-200 text-slate-600 rounded-md dark:bg-slate-800 dark:text-slate-400">Kontrak Bersama</span>;
+      case 'suami': return <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-md dark:bg-emerald-950/40 dark:text-emerald-400">Kontrak {member1.name}</span>;
+      case 'istri': 
+        if (!partnerEnabled) return null;
+        return <span className="text-[10px] font-bold px-2 py-0.5 bg-violet-50 border border-violet-100 text-violet-700 rounded-md dark:bg-violet-950/40 dark:text-violet-400">Kontrak {member2.name}</span>;
+      default: return <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-50 border border-slate-200 text-slate-600 rounded-md dark:bg-slate-800 dark:text-slate-400">{partnerEnabled ? 'Kontrak Bersama' : 'Kontrak Utama'}</span>;
     }
   };
 
@@ -338,9 +342,11 @@ export const BillsPage = () => {
                   <div>
                     <label className="block font-bold uppercase mb-1">Penanggung Jawab</label>
                     <select value={ownership} onChange={(e) => setOwnership(e.target.value)} className="w-full px-3 py-2 rounded-xl border bg-white dark:bg-slate-950 text-slate-900 dark:text-white font-bold">
-                      <option value="bersama">👪 Bersama</option>
-                      <option value="suami">🧑 Qisthi</option>
-                      <option value="istri">👩 Gita</option>
+                      <option value="bersama">{partnerEnabled ? '👪 Bersama' : '📁 Pribadi'}</option>
+                      <option value="suami">🧑 {member1.name}</option>
+                      {partnerEnabled && (
+                        <option value="istri">👩 {member2.name}</option>
+                      )}
                     </select>
                   </div>
                 </>

@@ -67,7 +67,7 @@ export const CreateGoalModal: React.FC<CreateGoalModalProps> = ({ isOpen, onClos
                 Tambah Target Impian
               </h4>
               <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
-                Set pos tabungan aset baru bersama istri.
+                Set pos alokasi tabungan untuk target impian baru.
               </p>
             </div>
           </div>

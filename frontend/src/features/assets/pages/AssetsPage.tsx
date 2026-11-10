@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAssets, type Asset } from '../hooks/useAssets';
 import { formatIDR } from '../../../lib/formatter';
+import { useFamily } from '../../../context/FamilyContext';
 import { Plus, Loader2, X, Pencil, Trash2, Wallet, Coins, Landmark, Trophy, Settings } from 'lucide-react';
 
 export const AssetsPage = () => {
   const { assets, loading, goldPrice, updateGoldPrice, addAsset, updateAsset, deleteAsset } = useAssets();
+  const { member1, member2, partnerEnabled } = useFamily();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
@@ -75,9 +77,11 @@ export const AssetsPage = () => {
 
   const getOwnershipBadge = (owner: string) => {
     switch (owner) {
-      case 'suami': return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 bg-blue-50 border border-blue-100 text-blue-600 rounded-md dark:bg-blue-950/40 dark:border-blue-900 dark:text-blue-400">Pegangan Qisthi</span>;
-      case 'istri': return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 bg-pink-50 border border-pink-100 text-pink-600 rounded-md dark:bg-pink-950/40 dark:border-pink-900 dark:text-pink-400">Pegangan Gita</span>;
-      default: return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 rounded-md dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300">Dana Bersama</span>;
+      case 'suami': return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-md dark:bg-emerald-950/40 dark:border-emerald-900 dark:text-emerald-400">Pegangan {member1.name}</span>;
+      case 'istri': 
+        if (!partnerEnabled) return null;
+        return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 bg-violet-50 border border-violet-100 text-violet-700 rounded-md dark:bg-violet-950/40 dark:border-violet-900 dark:text-violet-400">Pegangan {member2.name}</span>;
+      default: return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 rounded-md dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300">{partnerEnabled ? 'Dana Bersama' : 'Dana Utama'}</span>;
     }
   };
 
@@ -184,7 +188,16 @@ export const AssetsPage = () => {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div><label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Nama Aset</label><input type="text" required placeholder="Contoh: Mandiri Qisthi" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100" /></div>
               <div><label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Kategori</label><select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"><option value="Tabungan">Tabungan Bank</option><option value="Dompet Digital">Dompet Digital</option><option value="Cash">Cash / Tunai</option><option value="Emas">Emas / Logam Mulia</option><option value="Investasi">Investasi / Reksadana</option></select></div>
-              <div><label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Kepemilikan</label><select value={ownership} onChange={(e) => setOwnership(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-800 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"><option value="bersama">👪 Dana Bersama</option><option value="suami">🧑 Pegangan Qisthi</option><option value="istri">👩 Pegangan Gita</option></select></div>
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Kepemilikan</label>
+                <select value={ownership} onChange={(e) => setOwnership(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-800 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">
+                  <option value="bersama">{partnerEnabled ? '👪 Dana Bersama' : '📁 Dana Utama'}</option>
+                  <option value="suami">🧑 Pegangan {member1.name}</option>
+                  {partnerEnabled && (
+                    <option value="istri">👩 Pegangan {member2.name}</option>
+                  )}
+                </select>
+              </div>
               {category.toLowerCase() === 'emas' ? (
                 <div><label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Berat Emas (Gram)</label><input type="number" step="0.001" required placeholder="Contoh: 10.5" value={goldWeight} onChange={(e) => setGoldWeight(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 dark:border-slate-800 dark:bg-slate-950" /></div>
               ) : (

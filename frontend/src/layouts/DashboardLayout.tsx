@@ -16,9 +16,12 @@ import {
   ChevronRight,
   LogOut,
   User,
-  Target, // IMPORT IKON TARGET BARU UNTUK SAVING GOALS
+  Target,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useFamily } from '../context/FamilyContext';
+import { ChatAssistantWidget } from '../features/chat_assistant/components/ChatAssistantWidget';
 
 // ===== Types =====
 interface SidebarItemProps {
@@ -42,7 +45,8 @@ const MENU_ITEMS: MenuItem[] = [
   { to: '/pockets', icon: <Layers size={20} strokeWidth={2} />, label: 'Kantong Dana' },
   { to: '/transactions', icon: <Receipt size={20} strokeWidth={2} />, label: 'Riwayat Transaksi' },
   { to: '/bills', icon: <CalendarClock size={20} strokeWidth={2} />, label: 'Tagihan & Pengingat' },
-  { to: '/saving-goals', icon: <Target size={20} strokeWidth={2} />, label: 'Target Celengan' }, // <--- TAMBAH MENU BARU DI SIDEBAR LU
+  { to: '/saving-goals', icon: <Target size={20} strokeWidth={2} />, label: 'Target Celengan' },
+  { to: '/settings', icon: <Settings size={20} strokeWidth={2} />, label: 'Pengaturan' },
 ];
 
 // ===== Custom Hooks =====
@@ -200,6 +204,7 @@ export const DashboardLayout: React.FC = () => {
   const [isDark, toggleDarkMode] = useDarkMode();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const { user } = useAuth();
+  const { householdName, member1, member2, partnerEnabled } = useFamily();
 
   useEffect(() => {
     setIsMobileOpen(false);
@@ -245,8 +250,8 @@ export const DashboardLayout: React.FC = () => {
                 `}
               >
                 <h1 className="font-extrabold text-lg leading-none tracking-tight dark:text-white">Monify</h1>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-[0.2em]">
-                  Family Hub
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-[0.15em] truncate block max-w-[130px]">
+                  {householdName}
                 </span>
               </div>
             </Link>
@@ -310,12 +315,13 @@ export const DashboardLayout: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* User Info */}
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 rounded-xl">
-              <User size={14} className="text-slate-500 dark:text-slate-400" />
-              <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 truncate max-w-[120px]">
-                {user?.email?.split('@')[0] || 'User'}
-              </span>
+            {/* Partner Info Pill */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100/70 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/60 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300">
+              {partnerEnabled ? (
+                <span>🧑 {member1.name} & 👩 {member2.name}</span>
+              ) : (
+                <span>🧑 {member1.name}</span>
+              )}
             </div>
 
             {/* Dark mode toggle */}
@@ -330,7 +336,7 @@ export const DashboardLayout: React.FC = () => {
             {/* Status badge */}
             <span className="hidden sm:inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full border border-emerald-200/60 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/60">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Live Database
+              Universal FinTech
             </span>
           </div>
         </header>
@@ -341,6 +347,9 @@ export const DashboardLayout: React.FC = () => {
           </div>
         </div>
       </main>
+
+      {/* Floating In-App Chatbot Assistant */}
+      <ChatAssistantWidget />
     </div>
   );
 };

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { useAnalyticsData } from '../../analytics/hooks/useAnalyticsData'; // IMPORT HOOK BARU
+import { useFamily } from '../../../context/FamilyContext';
 import { CategoryPieChart } from '../../analytics/components/CategoryPieChart'; // IMPORT COMPONENT BARU
 import { MonthlyLineChart } from '../../analytics/components/MonthlyLineChart'; // IMPORT COMPONENT BARU
 import { TopExpensesWidget } from '../../analytics/components/TopExpensesWidget'; // IMPORT COMPONENT BARU
@@ -34,6 +35,7 @@ const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#6366f1', '#ec4899', '#8b5cf6'
 export const OverviewPage = () => {
   const { summary, loading: dashboardLoading, refreshDashboard } = useDashboardData();
   const { analytics, loading: analyticsLoading, refreshAnalytics } = useAnalyticsData(); // PAKAI HOOK ANALYTICS
+  const { householdName, member1, member2, partnerEnabled, getActorLabel } = useFamily();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'analytics' | 'insights'>('dashboard'); // STATE NAVIGATION TAB
 
   const loading = dashboardLoading || analyticsLoading;
@@ -59,16 +61,15 @@ export const OverviewPage = () => {
   };
 
   const getActorBadge = (actor: string) => {
-    if (actor === 'istri') {
-      return (
-        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.2 bg-pink-50 border border-pink-100 text-pink-600 rounded dark:bg-pink-950/30 dark:border-pink-900/50 dark:text-pink-400 font-mono">
-          Gita
-        </span>
-      );
-    }
+    const info = getActorLabel(actor);
+    const isMember2 = actor === 'istri' || actor === 'member_2';
     return (
-      <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.2 bg-blue-50 border border-blue-100 text-blue-600 rounded dark:bg-blue-950/30 dark:border-blue-900/50 dark:text-blue-400 font-mono">
-        Qisthi
+      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono ${
+        isMember2
+          ? 'bg-violet-50 border border-violet-200/60 text-violet-700 dark:bg-violet-950/40 dark:border-violet-900/50 dark:text-violet-300'
+          : 'bg-emerald-50 border border-emerald-200/60 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-900/50 dark:text-emerald-300'
+      }`}>
+        {info.badge} {info.name}
       </span>
     );
   };
@@ -84,7 +85,9 @@ export const OverviewPage = () => {
       {/* HEADER DASHBOARD */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800/60 pb-5">
         <div>
-          <h3 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Ringkasan Keuangan Keluarga</h3>
+          <h3 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">
+            Ringkasan Keuangan {householdName}
+          </h3>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Arsitektur kendali finansial dinamis terpusat.</p>
         </div>
         <button
@@ -158,13 +161,15 @@ export const OverviewPage = () => {
                   <span className="text-white font-semibold">{formatIDR(summary.sharedNetWorth)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>🧑 Harta Qisthi:</span>
-                  <span className="text-blue-400 font-semibold">{formatIDR(summary.suamiNetWorth)}</span>
+                  <span>🧑 Pegangan {member1.name}:</span>
+                  <span className="text-emerald-400 font-semibold">{formatIDR(summary.suamiNetWorth)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>👩 Harta Gita:</span>
-                  <span className="text-pink-400 font-semibold">{formatIDR(summary.istriNetWorth)}</span>
-                </div>
+                {partnerEnabled && (
+                  <div className="flex justify-between">
+                    <span>👩 Pegangan {member2.name}:</span>
+                    <span className="text-violet-400 font-semibold">{formatIDR(summary.istriNetWorth)}</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -209,36 +214,40 @@ export const OverviewPage = () => {
           </div>
 
           {/* PANEL BREAKDOWN SALDO KANTONG BERJALAN LENGKAP */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className={`grid grid-cols-1 ${partnerEnabled ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-5`}>
             <div className="p-4 bg-white border border-slate-100 dark:bg-slate-900 dark:border-slate-800/60 rounded-xl shadow-sm flex items-center gap-4">
               <div className="p-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl">
                 <Users size={20} />
               </div>
               <div>
-                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Kantong Bersama (Utama)</p>
+                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                  {partnerEnabled ? 'Kantong Bersama (Utama)' : 'Kantong Operasional Utama'}
+                </p>
                 <h4 className="text-base font-black text-slate-900 dark:text-white tracking-tight">{formatIDR(summary.sharedPocketsBalance)}</h4>
               </div>
             </div>
 
             <div className="p-4 bg-white border border-slate-100 dark:bg-slate-900 dark:border-slate-800/60 rounded-xl shadow-sm flex items-center gap-4">
-              <div className="p-3 bg-blue-50 dark:bg-blue-950/30 text-blue-500 dark:text-blue-400 rounded-xl">
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 rounded-xl">
                 <User size={20} />
               </div>
               <div>
-                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Jatah Kantong Qisthi</p>
-                <h4 className="text-base font-black text-blue-600 dark:text-blue-400 tracking-tight">{formatIDR(summary.suamiPocketsBalance)}</h4>
+                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Jatah {member1.name} ({member1.role})</p>
+                <h4 className="text-base font-black text-emerald-600 dark:text-emerald-400 tracking-tight">{formatIDR(summary.suamiPocketsBalance)}</h4>
               </div>
             </div>
 
-            <div className="p-4 bg-white border border-slate-100 dark:bg-slate-900 dark:border-slate-800/60 rounded-xl shadow-sm flex items-center gap-4">
-              <div className="p-3 bg-pink-50 dark:bg-pink-950/30 text-pink-500 dark:text-pink-400 rounded-xl">
-                <User size={20} />
+            {partnerEnabled && (
+              <div className="p-4 bg-white border border-slate-100 dark:bg-slate-900 dark:border-slate-800/60 rounded-xl shadow-sm flex items-center gap-4">
+                <div className="p-3 bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 rounded-xl">
+                  <User size={20} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Jatah {member2.name} ({member2.role})</p>
+                  <h4 className="text-base font-black text-violet-600 dark:text-violet-400 tracking-tight">{formatIDR(summary.istriPocketsBalance)}</h4>
+                </div>
               </div>
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Jatah Kantong Gita</p>
-                <h4 className="text-base font-black text-pink-600 dark:text-pink-400 tracking-tight">{formatIDR(summary.istriPocketsBalance)}</h4>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* MODUL ARUS KAS KELUARGA (CASH FLOW ANALYSIS) */}

@@ -1,0 +1,28 @@
+{
+  "household_name": "Keluarga Sakinah",
+  "currency": "IDR",
+  "low_fund_threshold": 100000,
+  "partner_enabled": false,
+  "member_1": {
+    "id": "member_1",
+    "name": "Ayah Qisthi",
+    "role": "Ayah",
+    "telegram_id": "616300758",
+    "telegram_chat_id": "616300758",
+    "color": "emerald"
+  },
+  "member_2": {
+    "id": "member_2",
+    "name": "Bunda Gita",
+    "role": "Ibu",
+    "telegram_id": "8651953651",
+    "telegram_chat_id": "8651953651",
+    "color": "violet"
+  },
+  "telegram_config": {
+    "enabled": true,
+    "bot_token": "8639941460:AAGPj6_UcYCdbcYftP8pivILydlNXIcN5bk",
+    "bot_username": "MoniBot"
+  },
+  "updated_at": "2026-10-01T13:50:54.477Z"
+}

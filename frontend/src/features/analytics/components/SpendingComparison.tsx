@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatIDR } from '../../../lib/formatter';
+import { useFamily } from '../../../context/FamilyContext';
 import { TrendingUp, TrendingDown, ArrowRightLeft, ShieldAlert, CheckCircle2 } from 'lucide-react';
 
 interface SpendingComparisonProps {
@@ -12,6 +13,7 @@ interface SpendingComparisonProps {
 }
 
 export const SpendingComparison: React.FC<SpendingComparisonProps> = ({ comparison }) => {
+  const { partnerEnabled } = useFamily();
   const { currentMonthExpense, lastMonthExpense, percentageChange, isHigher } = comparison;
 
   // Render teks insight dinamis berdasarkan kondisi keuangan bulanan
@@ -19,16 +21,18 @@ export const SpendingComparison: React.FC<SpendingComparisonProps> = ({ comparis
     if (currentMonthExpense === 0) return 'Belum ada pengeluaran tercatat bulan ini, Cuy. Dompet aman!';
     if (lastMonthExpense === 0) return 'Data pengeluaran bulan lalu kosong, belum bisa bandingin tren, Cuy.';
     
+    const pronoun = partnerEnabled ? 'lu berdua' : 'lu';
+
     if (isHigher) {
       if (percentageChange > 20) {
-        return 'Waduh Cuy, pengeluaran lu melonjak tajam dibanding bulan lalu! Coba rem dikit pos jajan harian lu berdua. 🚨';
+        return `Waduh Cuy, pengeluaran lu melonjak tajam dibanding bulan lalu! Coba rem dikit pos jajan harian ${pronoun}. 🚨`;
       }
       return 'Pengeluaran bulan ini sedikit lebih tinggi dari bulan lalu, Cuy. Jaga ritme biar gak boncos di akhir bulan.';
     } else {
       if (percentageChange > 20) {
-        return 'Gokil, Cuy! Lu berdua hemat banget bulan ini dibanding bulan kemarin. Pertahankan manajemen mantap ini! 🏆';
+        return `Gokil, Cuy! ${partnerEnabled ? 'Lu berdua' : 'Lu'} hemat banget bulan ini dibanding bulan kemarin. Pertahankan manajemen mantap ini! 🏆`;
       }
-      return 'Mantap, ritme belanja lu berdua lebih terkontrol dan lebih hemat dibanding bulan lalu. Aman sentosa!';
+      return `Mantap, ritme belanja ${pronoun} lebih terkontrol dan lebih hemat dibanding bulan lalu. Aman sentosa!`;
     }
   };
 

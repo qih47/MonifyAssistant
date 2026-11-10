@@ -9,13 +9,17 @@ import { checkAndNotifyLowFund } from './services/lowFundService.js';
 import { initBot } from './bot/init.js';
 
 
+import apiRoutes from './routes/apiRoutes.js';
+import { getSettings } from './services/settingsService.js';
+
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use('/api', apiRoutes);
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
 if (!botToken) {
@@ -48,17 +52,20 @@ const ALLOWED_CHAT_IDS = Object.keys(ALLOWED_USERS);
 // ==========================================
 // COMMAND /start
 // ==========================================
-bot.start((ctx) => {
-    // 📌 PERBAIKAN KRITIS: Kunci penentuan aktor secara presisi dari session state middleware
-    // Berikan fallback 'suami' jika inisialisasi state awal Telegram mendeteksi delay/null
+bot.start(async (ctx) => {
+    // 📌 Kunci penentuan aktor secara presisi dari session state middleware
     const finalActor = ctx.state.actor || 'suami';
-    const actorEmojiEmoji = finalActor === 'suami' ? '🧑 Qisthi' : '👩 Gita';
+    const settings = await getSettings();
+    const activeName = ctx.state.actorName || (finalActor === 'suami' ? settings.member_1.name : settings.member_2.name);
+    const activeRole = finalActor === 'suami' ? settings.member_1.role : settings.member_2.role;
+    const actorBadge = finalActor === 'suami' ? `🧑 ${activeName} (${activeRole})` : `👩 ${activeName} (${activeRole})`;
     
     ctx.reply(
         `━━━━━━━━━━━━━━━━━━━\n` +
         `🤖 *Moni - Asisten Keuangan*\n` +
         `━━━━━━━━━━━━━━━━━━━\n\n` +
-        `Halo ${actorEmojiEmoji}! 👋\n\n` +
+        `Halo ${activeName}! 👋\n` +
+        `Selamat datang di ruang keuangan *${settings.household_name}*.\n\n` +
         `📝 *Fitur Utama:*\n` +
         `• *Catat transaksi:* "Beli kopi 35rb"\n` +
         `• *Cek saldo:* /saldo atau "saldo"\n` +
@@ -67,7 +74,7 @@ bot.start((ctx) => {
         `• *Bayar tagihan:* /bayar [nama]\n` +
         `• *Bayar cicilan:* /cicil [nama]\n` +
         `• *Foto struk:* Kirim foto langsung\n\n` +
-        `Aktor: *${actorEmojiEmoji}*`,
+        `Aktor: *${actorBadge}*`,
         { parse_mode: 'Markdown' }
     );
 });

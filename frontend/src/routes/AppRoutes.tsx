@@ -7,7 +7,8 @@ import { AssetsPage } from '../features/assets/pages/AssetsPage';
 import { PocketsPage } from '../features/pockets/pages/PocketsPage';
 import { TransactionsPage } from '../features/transactions/pages/TransactionsPage';
 import { BillsPage } from '../features/bills/pages/BillsPage';
-import { SavingGoalsPage } from '../features/saving_goals/pages/SavingGoalsPage'; // <--- IMPORT MODUL BARU LU, CUY!
+import { SavingGoalsPage } from '../features/saving_goals/pages/SavingGoalsPage';
+import { SettingsPage } from '../features/settings/pages/SettingsPage';
 
 export const AppRoutes = () => {
   return (
@@ -28,7 +29,8 @@ export const AppRoutes = () => {
         <Route path="/pockets" element={<PocketsPage />} />
         <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/bills" element={<BillsPage />} />
-        <Route path="/saving-goals" element={<SavingGoalsPage />} /> {/* <--- ROUTE BARU TARGET TABUNGAN */}
+        <Route path="/saving-goals" element={<SavingGoalsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
 
       {/* Fallback - Redirect ke Home */}

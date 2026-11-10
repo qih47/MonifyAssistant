@@ -88,7 +88,7 @@ export const LoginPage: React.FC = () => {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="qisthi@gmail.com"
+                  placeholder="nama@email.com"
                   required
                   className="w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900 dark:focus:ring-white focus:border-transparent transition-all duration-300"
                 />
@@ -140,8 +140,8 @@ export const LoginPage: React.FC = () => {
 
           {/* Footer */}
           <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-700/50">
-            <p className="text-center text-xs text-slate-400 dark:text-slate-500">
-              🔒 Hanya untuk Qisthi & Gita
+            <p className="text-center text-xs text-slate-400 dark:text-slate-500 font-medium">
+              🔒 Akses Privat Pasangan • Monify Intelligent Financial Hub
             </p>
             <p className="text-center text-xs text-slate-400 dark:text-slate-500 mt-1">
               Monify Family Hub • v1.0

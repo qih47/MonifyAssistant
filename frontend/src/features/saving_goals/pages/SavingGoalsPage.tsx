@@ -88,7 +88,7 @@ export const SavingGoalsPage: React.FC = () => {
           <Target size={40} className="text-slate-300 dark:text-slate-700 mb-3 stroke-[1.5]" />
           <h3 className="text-sm font-black text-slate-700 dark:text-slate-300 uppercase">Belum Ada Target Impian</h3>
           <p className="text-xs text-slate-400 dark:text-slate-500 max-w-sm mt-1">
-            Yuk bikin list target baru, mulai dari ganti AC kamar, kulkas dua pintu, atau tabungan liburan bareng istri!
+            Yuk bikin list target baru, mulai dari ganti AC kamar, kulkas dua pintu, atau tabungan liburan impian!
           </p>
         </div>
       )}

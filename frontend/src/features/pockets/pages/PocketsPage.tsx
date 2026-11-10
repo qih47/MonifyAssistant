@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { usePockets, type Pocket } from '../hooks/usePockets';
 import { formatIDR } from '../../../lib/formatter';
+import { useFamily } from '../../../context/FamilyContext';
 import { Plus, FolderPlus, Loader2, X, Pencil, Trash2, Wallet } from 'lucide-react';
 
 const formatPocketName = (name: string): string => {
@@ -13,6 +14,7 @@ const formatPocketName = (name: string): string => {
 
 export const PocketsPage = () => {
   const { pockets, assets, loading, addPocket, updatePocket, deletePocket } = usePockets();
+  const { member1, member2, partnerEnabled } = useFamily();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPocket, setEditingPocket] = useState<Pocket | null>(null);
@@ -91,11 +93,12 @@ export const PocketsPage = () => {
   const getOwnershipBadge = (owner: string) => {
     switch (owner) {
       case 'suami':
-        return <span className="text-[10px] font-black px-2 py-0.5 bg-blue-50 border border-blue-100 text-blue-600 rounded-md dark:bg-blue-950/40 dark:border-blue-900 dark:text-blue-400">Kantong Qisthi</span>;
+        return <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-md dark:bg-emerald-950/40 dark:border-emerald-900 dark:text-emerald-400">Kantong {member1.name}</span>;
       case 'istri':
-        return <span className="text-[10px] font-black px-2 py-0.5 bg-pink-50 border border-pink-100 text-pink-600 rounded-md dark:bg-pink-950/40 dark:border-pink-900 dark:text-pink-400">Kantong Gita</span>;
+        if (!partnerEnabled) return null;
+        return <span className="text-[10px] font-bold px-2 py-0.5 bg-violet-50 border border-violet-100 text-violet-700 rounded-md dark:bg-violet-950/40 dark:border-violet-900 dark:text-violet-400">Kantong {member2.name}</span>;
       default:
-        return <span className="text-[10px] font-black px-2 py-0.5 bg-slate-50 border border-slate-200 text-slate-700 rounded-md dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300">Pos Bersama</span>;
+        return <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-50 border border-slate-200 text-slate-700 rounded-md dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300">{partnerEnabled ? 'Pos Bersama' : 'Pos Utama'}</span>;
     }
   };
 
@@ -220,9 +223,11 @@ export const PocketsPage = () => {
               <div>
                 <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">Kepemilikan Kantong</label>
                 <select value={ownership} onChange={(e) => setOwnership(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-800 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">
-                  <option value="bersama">👪 Pos Bersama Rumah Tangga</option>
-                  <option value="suami">🧑 Jatah Pribadi Qisthi</option>
-                  <option value="istri">👩 Jatah Pribadi Gita</option>
+                  <option value="bersama">{partnerEnabled ? '👪 Pos Bersama Rumah Tangga' : '📁 Pos Operasional Utama'}</option>
+                  <option value="suami">🧑 Jatah Pribadi {member1.name}</option>
+                  {partnerEnabled && (
+                    <option value="istri">👩 Jatah Pribadi {member2.name}</option>
+                  )}
                 </select>
               </div>
 
